@@ -1,0 +1,65 @@
+{
+  "get_weather_forecast": {
+    "success": true,
+    "source": "Open-Meteo",
+    "source_url": "https://api.open-meteo.com/v1/forecast?latitude=38.72509&longitude=-9.1498&daily=weather_code%2Ctemperature_2m_max%2Ctemperature_2m_min%2Cprecipitation_probability_max&forecast_days=7&timezone=auto"
+  },
+  "get_exchange_rate": {
+    "success": true,
+    "source": "ExchangeRate-API",
+    "source_url": "https://open.er-api.com/v6/latest/EUR"
+  },
+  "itinerary": {
+    "success": true,
+    "models_used": [
+      "gpt-4o-mini",
+      "gpt-4.1-mini"
+    ]
+  },
+  "image": {
+    "success": true
+  },
+  "cost_usd": 0.0048021,
+  "metrics": [
+    {
+      "model": "gpt-4o-mini",
+      "purpose": "conversation",
+      "input": 504,
+      "output": 31,
+      "cached_input": 0,
+      "cost_usd": 9.419999999999999e-05,
+      "latency_s": 1.1202378000016324,
+      "usage_missing": false
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "purpose": "itinerary",
+      "input": 1136,
+      "output": 25,
+      "cached_input": 0,
+      "cost_usd": 0.0004944,
+      "latency_s": 0.9719316000118852,
+      "usage_missing": false
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "purpose": "itinerary",
+      "input": 1278,
+      "output": 594,
+      "cached_input": 1152,
+      "cost_usd": 0.001116,
+      "latency_s": 5.824878100014757,
+      "usage_missing": false
+    },
+    {
+      "model": "gpt-image-2",
+      "purpose": "image",
+      "input": 63,
+      "output": 196,
+      "cached_input": 0,
+      "cost_usd": 0.0030975,
+      "latency_s": 14.181934299995191,
+      "usage_missing": false
+    }
+  ]
+}
