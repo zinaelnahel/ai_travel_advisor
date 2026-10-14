@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SafarAI &mdash; big adventures start here</title>
+    <meta name="description" content="Dream, discover, and plan your next adventure with SafarAI, your playful AI travel companion.">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/app.js" defer>
+    </script>
+  </head>
+  <body>
+    <!-- Branding and new-trip control -->
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="SafarAI home">
+        <span class="brand-icon" aria-hidden="true">&#9992;</span>
+        <span>Safar<span class="brand-ai">AI</span></span>
+      </a>
+      <span class="top-note">Small dreams. Big adventures!</span>
+      <button id="reset" class="button secondary">＋ New trip</button>
+    </header>
+    <main>
+      <!-- Travel illustration and welcome -->
+      <section class="intro">
+        <div class="intro-copy">
+          <p class="eyebrow">
+            <span>
+            </span>
+            HELLO, WORLD. HERE WE COME!
+          </p>
+          <h1>
+            Big adventures.
+            <br>
+            <em>Happy little plans.</em>
+          </h1>
+          <p class="subtitle">
+            Pack your curiosity! SafarAI turns your travel dreams
+            <br class="desktop-break">
+            into a world of fun things to do.
+          </p>
+          <div class="adventure-badges">
+            <span>&#10022; Dream it</span>
+            <span>&#9992; Explore it</span>
+            <span>&#9825; Make memories</span>
+          </div>
+        </div>
+        <div class="intro-art">
+          <img src="/static/exploration.svg" alt="Playful illustration of a smiling globe, a hot-air balloon, a paper plane, mountains, and a suitcase">
+          <span class="art-sticker">Oh, the places we'll go!</span>
+        </div>
+      </section>
+      {% if not configured %}
+      <div class="setup-note" role="status">Ready for setup: add OPENAI_API_KEY to your server’s .env file and restart to start planning.</div>
+      {% endif %}
+      <section class="workspace">
+        <!-- Conversation and message input -->
+        <aside class="chat-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">YOUR ADVENTURE STARTS HERE</p>
+              <h2>Meet your adventure buddy</h2>
+            </div>
+            <span class="online-dot" title="AI travel advisor">
+            </span>
+          </div>
+          <div id="messages" class="messages" role="log" aria-live="polite" aria-label="Travel conversation">
+            <article class="message assistant">
+              <span class="avatar" aria-hidden="true">&#9992;</span>
+              <div class="bubble">
+                <p>Hi, explorer! I'm SafarAI. Where would you like to go, how long are you staying, and what do you love doing?</p>
+                <p class="muted">Big dreams or tiny ideas &mdash; let's start exploring!</p>
+              </div>
+            </article>
+          </div>
+          <div id="starters" class="starters">
+            <span>Pick a little adventure</span>
+            <button data-prompt="Plan three days in Lisbon. I enjoy food and architecture.">&#9728; Sunny Lisbon</button>
+            <button data-prompt="Plan four days in Kyoto. I enjoy gardens, food and culture.">&#10047; Magical Kyoto</button>
+            <button data-prompt="Plan two days in Copenhagen. I enjoy design, cycling and cafes.">&#9752; Copenhagen by bike</button>
+          </div>
+          <form id="chat-form">
+            <label for="message" class="sr-only">Describe your trip</label>
+            <div class="composer">
+              <textarea id="message" maxlength="6000" rows="2" placeholder="Three days in Rome, good food, hidden gems…" required>
+              </textarea>
+              <button id="send" type="submit" aria-label="Send message">↑</button>
+            </div>
+            <div class="composer-foot">
+              <span>Enter to send · Shift + Enter for a new line</span>
+              <span id="status" role="status">Ready to explore</span>
+            </div>
+          </form>
+        </aside>
+        <!-- Itinerary, download, and optional image -->
+        <section class="plan-panel" aria-labelledby="plan-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">YOUR VERY OWN EXPLORER BOOK</p>
+              <h2 id="plan-heading">Your next adventure</h2>
+            </div>
+            <span class="tag">&#10022; ADVENTURE MAP</span>
+          </div>
+          <div id="empty-plan" class="empty-plan">
+            <div class="route-art" aria-hidden="true">
+              <span class="map-cloud">&#9729;</span>
+              <span class="map-mountain">&#9650;</span>
+              <span class="map-sun">&#9728;</span>
+              <span class="route-start">&#9992;</span>
+              <div class="route-line">
+              </div>
+              <span class="route-end">&#9873;</span>
+            </div>
+            <p class="eyebrow">A WORLD FULL OF WONDER</p>
+            <h3>
+              Ready, set
+              &hellip;
+              <br>
+              <em>let's explore!</em>
+            </h3>
+            <p>
+              Your adventure map will appear right here.
+              <br>
+              Tell us where you want to go and what makes you smile.
+            </p>
+            <div class="feature-row">
+              <span>&#9728; Happy little days</span>
+              <span>&#10022; Amazing discoveries</span>
+              <span>&#9825; A budget that fits</span>
+            </div>
+          </div>
+          <div id="plan-content" hidden>
+            <div class="plan-actions">
+              <button id="download" class="button secondary">↓ Save as PDF</button>
+              <button id="image-button" class="button secondary">✧ Add a destination image</button>
+            </div>
+            <p class="image-note">Images are optional and generated only on request. One low-quality image per plan.</p>
+            <figure id="image-wrap" hidden>
+              <img id="destination-image" alt="AI-generated destination illustration">
+              <figcaption>AI-generated illustration · a little inspiration, not a map</figcaption>
+            </figure>
+            <article id="itinerary" class="itinerary">
+            </article>
+          </div>
+        </section>
+      </section>
+      <footer>
+        <span>SafarAI &middot; Made for curious hearts.</span>
+        <details id="usage-details">
+          <summary>Conversation usage &amp; cost</summary>
+          <div id="usage">No requests yet.</div>
+        </details>
+        <span>Check local details before booking.</span>
+      </footer>
+    </main>
+  </body>
+</html>

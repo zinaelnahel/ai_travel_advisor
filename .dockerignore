@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+__pycache__
+**/__pycache__
+.venv
+integration_smoke
+model_comparison
+tests
+*.png
