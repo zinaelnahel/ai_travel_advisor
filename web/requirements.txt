@@ -1,3 +1,2 @@
--r ../requirements.txt
-Flask>=3.1,<4
-gunicorn>=23,<24; sys_platform != "win32"
+﻿-r ../requirements-api.txt
+httpx>=0.28,<1

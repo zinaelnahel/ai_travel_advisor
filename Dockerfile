@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 WORKDIR /app
-COPY requirements.txt ./
+COPY requirements-streamlit.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY advisor.py itinerary_prompt.txt streamlit_app.py streamlit_style.html pdf_export.py ./
 COPY web/static/exploration.svg ./web/static/exploration.svg

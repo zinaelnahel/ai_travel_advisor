@@ -1,89 +1,100 @@
-# SafarAI
+﻿# SafarAI
 
-## Streamlit app (recommended)
+SafarAI uses a stateless FastAPI backend with a responsive browser interface.
+Each request creates a fresh advisor. The browser sends its signed trip state
+with each request; the server keeps no sessions, conversations, image cache,
+or user files in memory between requests.
 
-SafarAI runs on desktop and phone with a colorful exploration theme, chat,
-a separate itinerary, actual PDF downloads, and optional destination images.
-Panels stack on small screens. Images are generated only when requested.
-
-```powershell
-python -m pip install -r requirements.txt
-python -m streamlit run streamlit_app.py
-```
-
-Open the local URL printed in your terminal. Your existing `.env` works locally.
-
-### Deploy on Streamlit Community Cloud
-
-1. Push the project to `zinaelnahel/ai_travel_advisor` on GitHub.
-2. Sign in at https://share.streamlit.io and select **Create app**.
-3. Choose repository **zinaelnahel/ai_travel_advisor**, branch **main**,
-   and main file **streamlit_app.py**. Select Python **3.12** in Advanced settings.
-4. In **Advanced settings > Secrets**, paste your private values:
-
-```toml
-OPENAI_API_KEY = "your-actual-key"
-APP_PASSWORD = "your-private-app-password"
-CONVERSATION_BUDGET_USD = "1.0"
-```
-
-5. Click **Deploy**, then open the provided `streamlit.app` HTTPS URL on your
-   phone. Use your app password when prompted. Keep API keys in Secrets,
-   never in GitHub. `.streamlit/secrets.toml.example` is a placeholder template.
-
-[Official deployment instructions](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy)
-and [Secrets management](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management).
-
-Community Cloud hosting does not pay for OpenAI requests. The app still uses
-paid API calls. Conversations last for the current browser session and can be
-lost on reload/disconnection or server restart. The optional shared password
-is for a private demo; conversation budgets reset when a new trip starts.
-
-### Alternative Flask interface
-
-The existing Flask frontend is still available locally:
+## Run locally
 
 ```powershell
 python -m pip install -r web/requirements.txt
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Copy `.env.example` to `.env`, set `OPENAI_API_KEY`, and put the generated value
+in `STATE_SIGNING_SECRET`. Then run:
+
+```powershell
 python -m web.app
 ```
 
-Open http://127.0.0.1:8000. The Dockerfile now runs the recommended Streamlit
-app on port 8501. Inject OPENAI_API_KEY and APP_PASSWORD as private environment
-variables when running a container. Streamlit Cloud builds from requirements.txt
-and does not use the Dockerfile.
+Open http://127.0.0.1:8000. Set `APP_PASSWORD` to protect a private deployment.
 
-## Code layout
+## Deploy to Vercel
 
-- `streamlit_app.py`: main Streamlit interface and per-browser state.
-- `streamlit_style.html`: playful, responsive theme.
-- `pdf_export.py`: downloadable PDF itineraries.
-- `advisor.py`: shared AI and travel logic.
-- `web/app.py`: browser sessions and the three API actions.
-- `web/templates/index.html`: page structure.
-- `web/static/style.css`: responsive styling.
-- `web/static/app.js`: chat, reset, image, and PDF controls.
-- `web/static/exploration.svg`: the travel illustration.
+The root `app.py` exports the FastAPI application using Vercel's supported
+entrypoint. `vercel.json` explicitly declares one FastAPI service named `app`,
+routes all public paths to it, and allows up to 300 seconds per function invocation.
+The root `app.py` imports `web.app`; these are two entry points for the same
+application, not independent services. No internal service calls or bindings
+are needed. Browser requests keep their existing `/api/` paths.
+Root `requirements.txt` contains only API dependencies, and `pyproject.toml`
+selects Python 3.12.
 
-## Notebooks
+1. Push these changes to `zinaelnahel/ai_travel_advisor`.
+2. Import that repository in Vercel, with the repository root as Root Directory.
+   Import the Services configuration from `vercel.json` and keep default
+   build/output settings. Do not add the auto-detected `web` Flask service.
+3. Add server environment variables: `OPENAI_API_KEY`, `STATE_SIGNING_SECRET`
+   (a random value of at least 32 characters), `APP_PASSWORD` for private access,
+   and optionally `CONVERSATION_BUDGET_USD` (default `1.0`). Use the same signing
+   secret across instances of a deployment. Never put secrets in Git or browser code.
+4. Deploy. Verify `https://<your-project>.vercel.app/health` returns
+   `{"status":"ok"}`, then open `/` and test chat.
 
-Open `ai_travel_advisor.ipynb` in Jupyter or VS Code and run its cells from top
-to bottom. Start Jupyter in this project folder so the notebooks can find each
-other. Put your API key in `.env` as `OPENAI_API_KEY=your-key`.
+With a logged-in Vercel CLI, deploy from this directory with `vercel --prod`.
+See [Vercel's FastAPI documentation](https://vercel.com/docs/frameworks/backend/fastapi).
+Deployment requires Vercel account/project access; adding configuration alone
+does not publish the app.
 
-The main notebook installs the packages, loads the travel functions, sets up
-the advisor, and displays the chat. You can change the models and conversation
-budget in its setup cell.
+## API contract and state
 
-Supporting notebooks:
+`GET /health` is public. `POST /api/chat`, `/api/image`, and `/api/reset`
+accept JSON and require `X-Travel-Request: 1`. When a password is configured,
+send HTTP Basic authentication. Browser requests must come from the same origin.
 
-- `advisor.py`: shared travel tools, memory, planning, and images.
-- `advisor.ipynb`: a one-cell loader for the shared Python file.
-- `notebook_ui.ipynb`: chat text box and buttons; loaded by the main notebook.
-- `compare_models.ipynb`: optional model comparison. Set `run_comparison = True` to run it.
-- `smoke_test_live.ipynb`: optional live checks. Set `run_live_checks = True` to run them.
-- `test_advisor.ipynb`: 16 offline checks using fake responses; no API charges.
+Start chat with `{"message":"Three days in Lisbon, interested in food"}`.
+Every successful action returns `state`; pass it unchanged as `state` in the
+next JSON request. Chat also returns sanitized `reply`, optional `itinerary`,
+`itinerary_html`, `destination`, and `usage_html`. Image generation requires a
+state containing an itinerary. Reset returns an empty signed trip state.
 
-Comparison and live checks make paid API calls when enabled. Notebook outputs
-are cleared in the saved files. Keep your key private and clear personal chat
-outputs before sharing a notebook.
+Tokens expire after one hour of inactivity. State is signed, not encrypted:
+it contains the conversation and usage but never the API key. The page keeps it
+in memory; refreshing starts a new trip. Images remain in the page and are not
+cached on the server. API clients should keep requests sequential and retain
+an image locally to avoid paying for duplicate generation.
+
+Stateless tokens can be replayed or discarded. Conversation budgets are an
+estimate for the supplied state, not account-wide billing limits or replay
+protection. Configure provider spending limits and deployment access controls
+as appropriate. Long model/tool chains can exceed the function duration, and
+large generated images can exceed Vercel's response-size limit; failed requests
+may still incur provider costs. Rotating the signing secret invalidates old trips.
+
+## Other interfaces
+
+The Streamlit interface, PDFs, and notebooks remain available. Install their
+separate dependencies before using them:
+
+```powershell
+python -m pip install -r requirements-streamlit.txt
+python -m streamlit run streamlit_app.py
+```
+
+The Dockerfile runs Streamlit on port 8501. Root API requirements intentionally
+do not install Streamlit or Jupyter dependencies. For Streamlit Cloud, configure
+a separate app source/dependency setup using `requirements-streamlit.txt`.
+Notebooks use `advisor.py`; model comparisons and live checks incur API charges.
+
+## Validation
+
+```powershell
+python -m pip install -r web/requirements.txt -r requirements-streamlit.txt
+python -m unittest discover -s tests -v
+```
+
+Tests cover stateless continuity across new app instances, isolation, state
+signatures/expiry, itinerary/image/reset flows, authentication, request limits,
+origin checks, provider failures, and the legacy Streamlit/PDF interface.

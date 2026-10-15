@@ -1,4 +1,5 @@
-// Page state. The server stores the actual conversation.
+// Trip state stays in this page; each API call is independent.
+let tripState = null;
 const $ = (id) => document.getElementById(id);
 const greeting = $('messages').innerHTML;
 let busy = false;
@@ -52,13 +53,14 @@ async function request(action, body = {}) {
   const response = await fetch(`/api/${action}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-Travel-Request': '1'},
-    body: JSON.stringify(body),
+    body: JSON.stringify({...body, state: tripState}),
   });
   if (!response.headers.get('Content-Type')?.includes('application/json')) {
     throw new Error('The server is unavailable or requires sign-in. Refresh and try again.');
   }
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Please try again.');
+  if (data.state) tripState = data.state;
   if (data.usage_html) $('usage').innerHTML = data.usage_html;
   return data;
 }
@@ -114,7 +116,7 @@ for (const button of document.querySelectorAll('[data-prompt]')) {
   });
 }
 
-// Clear the server conversation and the displayed trip together.
+// Reset the signed conversation and the displayed trip together.
 $('reset').addEventListener('click', () => {
   withProgress('Starting fresh...', async () => {
     await request('reset');
@@ -130,7 +132,7 @@ $('reset').addEventListener('click', () => {
   });
 });
 
-// Images are optional; the server reuses the image for the current plan.
+// Images are optional and retained in this page for the current plan.
 $('image-button').addEventListener('click', () => {
   if (hasImage) return;
   withProgress('Creating a little inspiration...', async () => {

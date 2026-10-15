@@ -1,145 +1,147 @@
-"""SafarAI web app. Start with: python -m web.app."""
+﻿"""Stateless FastAPI interface; run with python -m web.app."""
 import base64
 import hmac
 import os
-import secrets
-import threading
-import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
-from werkzeug.middleware.proxy_fix import ProxyFix
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from itsdangerous import BadData, URLSafeTimedSerializer
+from starlette.concurrency import run_in_threadpool
 
 from advisor import TravelAdvisor, safe_markdown
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env')
+STATE_FIELDS = ('history', 'summary', 'metrics', 'last_itinerary', 'last_brief', 'summary_count')
+MAX_BODY = 1_000_000
 
 
 def create_app(advisor_factory=None):
-    app = Flask(__name__)
-    # Enable only behind the hosting provider's single trusted HTTPS proxy.
-    if os.getenv('TRUST_PROXY', 'false').lower() == 'true':
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=1, x_host=0, x_port=0, x_prefix=0)
-    app.config['TEMPLATES_AUTO_RELOAD'] = True
-    app.config['MAX_CONTENT_LENGTH'] = 16000
-    sessions = {}
-    session_lock = threading.Lock()
-    secure = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
+    app = FastAPI(title='SafarAI API', docs_url=None, redoc_url=None)
+    app.mount('/static', StaticFiles(directory=ROOT / 'web/static'), name='static')
+    templates = Jinja2Templates(directory=ROOT / 'web/templates')
 
-    # Protect private deployments and reject cross-site requests.
-    @app.before_request
-    def protect():
-        if request.path == '/health':
-            return None
+    def serializer():
+        secret = os.getenv('STATE_SIGNING_SECRET', '')
+        if len(secret) < 32:
+            raise RuntimeError('Set STATE_SIGNING_SECRET to a random value of at least 32 characters.')
+        return URLSafeTimedSerializer(secret, salt='safarai-state-v1')
+
+    @app.middleware('http')
+    async def protect(request: Request, call_next):
+        response = None
         password = os.getenv('APP_PASSWORD', '')
-        if password:
-            auth = request.authorization
-            if not auth or not hmac.compare_digest(auth.password or '', password):
-                return 'Sign in to your travel advisor.', 401, {'WWW-Authenticate': 'Basic realm="Travel Advisor"'}
-        if request.path.startswith('/api/') and request.method == 'POST':
-            if request.headers.get('X-Travel-Request') != '1':
-                return jsonify(error='Invalid request.'), 403
-            origin = request.headers.get('Origin')
-            if origin and origin != request.host_url.rstrip('/'):
-                return jsonify(error='Cross-site requests are blocked.'), 403
-
-    @app.after_request
-    def headers(response):
-        response.headers['Cache-Control'] = 'no-store'
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Referrer-Policy'] = 'same-origin'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+        if password and request.url.path != '/health':
+            try:
+                scheme, encoded = request.headers.get('authorization', '').split(' ', 1)
+                credentials = base64.b64decode(encoded, validate=True).decode().split(':', 1)
+                valid = scheme.lower() == 'basic' and len(credentials) == 2 and hmac.compare_digest(credentials[1].encode(), password.encode())
+            except (ValueError, UnicodeError):
+                valid = False
+            if not valid:
+                response = JSONResponse({'error': 'Sign in to your travel advisor.'}, 401,
+                                        headers={'WWW-Authenticate': 'Basic realm="Travel Advisor"'})
+        if response is None and request.url.path.startswith('/api/') and request.method == 'POST':
+            origin = request.headers.get('origin')
+            expected = str(request.base_url).rstrip('/')
+            # Vercel terminates TLS before forwarding requests to the function.
+            if os.getenv('VERCEL') == '1':
+                expected = 'https://' + request.url.netloc
+            if request.headers.get('x-travel-request') != '1' or (origin and origin != expected):
+                response = JSONResponse({'error': 'Cross-site or invalid request.'}, 403)
+        if response is None:
+            response = await call_next(request)
+        response.headers.update({
+            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'same-origin',
+            'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+        })
         return response
 
-    # Each browser gets its own advisor; inactive sessions expire after an hour.
-    def get_session():
-        now = time.monotonic()
-        sid = request.cookies.get('travel_session')
-        with session_lock:
-            for key, value in list(sessions.items()):
-                if now - value['seen'] > 3600 and not value['lock'].locked():
-                    del sessions[key]
-            if sid not in sessions:
-                if len(sessions) >= 100:
-                    raise RuntimeError('Session capacity reached. Try again later.')
-                sid = secrets.token_urlsafe(32)
-                advisor = advisor_factory() if advisor_factory else TravelAdvisor(
-                    os.getenv('OPENAI_API_KEY', ''),
-                    budget_usd=float(os.getenv('CONVERSATION_BUDGET_USD', '1')),
-                )
-                sessions[sid] = {'advisor': advisor, 'lock': threading.Lock(), 'seen': now, 'image': None}
-            sessions[sid]['seen'] = now
-            return sid, sessions[sid]
-
     @app.get('/')
-    def home():
-        return render_template('index.html', configured=bool(os.getenv('OPENAI_API_KEY')))
+    def home(request: Request):
+        return templates.TemplateResponse(request=request, name='index.html',
+                                          context={'configured': bool(os.getenv('OPENAI_API_KEY'))})
 
     @app.get('/health')
     def health():
-        return jsonify(status='ok')
+        return {'status': 'ok'}
 
-    # Three actions: send a message, clear the trip, or request one image.
-    @app.post('/api/<action>')
-    def api(action):
-        if action not in ('chat', 'reset', 'image'):
-            return jsonify(error='Unknown action.'), 404
-        if not advisor_factory and not os.getenv('OPENAI_API_KEY'):
-            return jsonify(error='Add OPENAI_API_KEY to the server environment, then restart the app.'), 503
+    def process(action, body):
         try:
-            sid, state = get_session()
+            signer = serializer()
         except RuntimeError as exc:
-            return jsonify(error=str(exc)), 503
-        if not state['lock'].acquire(blocking=False):
-            return jsonify(error='Your previous request is still running.'), 409
+            return JSONResponse({'error': str(exc)}, 503)
+        if not advisor_factory and not os.getenv('OPENAI_API_KEY'):
+            return JSONResponse({'error': 'Configure OPENAI_API_KEY on the server.'}, 503)
+        advisor = advisor_factory() if advisor_factory else TravelAdvisor(
+            os.environ['OPENAI_API_KEY'], budget_usd=float(os.getenv('CONVERSATION_BUDGET_USD', '1')))
+        token = body.get('state')
+        if token is not None and action != 'reset':
+            try:
+                if not isinstance(token, str) or len(token) > MAX_BODY:
+                    raise ValueError()
+                state = signer.loads(token, max_age=3600)
+                if not isinstance(state, dict) or set(state) != set(STATE_FIELDS):
+                    raise ValueError()
+                for field in STATE_FIELDS:
+                    setattr(advisor, field, state[field])
+            except (BadData, ValueError, TypeError):
+                return JSONResponse({'error': 'Trip state is invalid or expired. Start a new trip.'}, 400)
         try:
-            advisor = state['advisor']
             if action == 'reset':
                 advisor.reset()
-                state['image'] = None
                 result = {'reset': True}
             elif action == 'image':
                 if not advisor.last_itinerary:
-                    return jsonify(error='Create an itinerary first.'), 400
-                if state['image'] is None:
-                    state['image'] = base64.b64encode(advisor.generate_image()).decode('ascii')
-                result = {'image': 'data:image/png;base64,' + state['image']}
+                    return JSONResponse({'error': 'Create an itinerary first.'}, 400)
+                result = {'image': 'data:image/png;base64,' + base64.b64encode(advisor.generate_image()).decode('ascii')}
             else:
-                body = request.get_json(silent=True) or {}
-                if not isinstance(body, dict):
-                    return jsonify(error='Invalid request body.'), 400
                 text = body.get('message')
                 if not isinstance(text, str) or not text.strip() or len(text) > 6000:
-                    return jsonify(error='Enter a message of 1–6,000 characters.'), 400
+                    return JSONResponse({'error': 'Enter a message of 1-6,000 characters.'}, 400)
                 previous_plan, previous_brief = advisor.last_itinerary, advisor.last_brief
-                try:
-                    reply = advisor.reply(text)
-                except Exception:
-                    advisor.last_itinerary, advisor.last_brief = previous_plan, previous_brief
-                    raise
-                new_plan = advisor.last_itinerary
-                result = {'reply': safe_markdown(reply), 'itinerary': new_plan,
-                          'itinerary_html': safe_markdown(new_plan) if new_plan else None,
+                reply = advisor.reply(text)
+                plan = advisor.last_itinerary
+                result = {'reply': safe_markdown(reply), 'itinerary': plan,
+                          'itinerary_html': safe_markdown(plan) if plan else None,
                           'destination': (advisor.last_brief or {}).get('destination')}
-                if new_plan:
-                    state['image'] = None
-                else:
+                if not plan:
                     advisor.last_itinerary, advisor.last_brief = previous_plan, previous_brief
             result['usage_html'] = advisor.usage_summary_html()
-            response = jsonify(result)
-            response.set_cookie('travel_session', sid, httponly=True, secure=secure, samesite='Strict', max_age=3600)
-            return response
+            result['state'] = signer.dumps({field: getattr(advisor, field) for field in STATE_FIELDS})
+            return JSONResponse(result)
         except (RuntimeError, ValueError, KeyError, TypeError):
-            return jsonify(error='The request failed. Check API access or quota, or try a shorter request. Your itinerary remains available.'), 502
-        finally:
-            state['seen'] = time.monotonic()
-            state['lock'].release()
+            return JSONResponse({'error': 'The request failed. Check API access or quota, or try a shorter request. Your itinerary remains available.'}, 502)
+
+    @app.post('/api/{action}')
+    async def api(action: str, request: Request):
+        if action not in ('chat', 'reset', 'image'):
+            return JSONResponse({'error': 'Unknown action.'}, 404)
+        size = 0
+        chunks = []
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_BODY:
+                return JSONResponse({'error': 'Request body is too large.'}, 413)
+            chunks.append(chunk)
+        import json
+        try:
+            body = json.loads(b''.join(chunks))
+        except (ValueError, UnicodeError):
+            return JSONResponse({'error': 'Invalid request body.'}, 400)
+        if not isinstance(body, dict):
+            return JSONResponse({'error': 'Invalid request body.'}, 400)
+        return await run_in_threadpool(process, action, body)
 
     return app
 
 
 app = create_app()
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=int(os.getenv('PORT', '8000')), debug=False)
+    import uvicorn
+    uvicorn.run('web.app:app', host='127.0.0.1', port=int(os.getenv('PORT', '8000')))
