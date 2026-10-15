@@ -1,6 +1,6 @@
 # Security review
 
-Reviewed the notebook, API transport, tool dispatch, summaries, images and benchmark workflow. This is a local notebook application, not a hardened public service.
+Reviewed the stateless FastAPI application, notebook interface, API transport, tool dispatch, summaries, images and benchmark workflow. This is a demo with optional password authentication, not a hardened public service. Trip state is signed, not encrypted, and held by the browser. Signatures prevent modification but do not prevent replay; budgets are not account-wide spending limits.
 
 | Risk | Implemented mitigation | Remaining limitation / production next step |
 |---|---|---|

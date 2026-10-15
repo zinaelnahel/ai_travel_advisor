@@ -8,7 +8,7 @@ or user files in memory between requests.
 ## Run locally
 
 ```powershell
-python -m pip install -r web/requirements.txt
+python -m pip install -r requirements.txt
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
@@ -73,28 +73,28 @@ as appropriate. Long model/tool chains can exceed the function duration, and
 large generated images can exceed Vercel's response-size limit; failed requests
 may still incur provider costs. Rotating the signing secret invalidates old trips.
 
-## Other interfaces
+## Notebooks and coursework
 
-The Streamlit interface, PDFs, and notebooks remain available. Install their
-separate dependencies before using them:
+The notebooks, model comparison reports, and saved integration results remain
+as coursework evidence. Install the development dependencies to run notebooks:
 
 ```powershell
-python -m pip install -r requirements-streamlit.txt
-python -m streamlit run streamlit_app.py
+python -m pip install -r requirements-dev.txt
 ```
 
-The Dockerfile runs Streamlit on port 8501. Root API requirements intentionally
-do not install Streamlit or Jupyter dependencies. For Streamlit Cloud, configure
-a separate app source/dependency setup using `requirements-streamlit.txt`.
-Notebooks use `advisor.py`; model comparisons and live checks incur API charges.
+Open `ai_travel_advisor.ipynb` for the notebook interface. Notebooks import
+`advisor.py` directly; `compare_models.ipynb` uses `model_comparison.py`.
+Model comparisons and live checks incur API charges when explicitly enabled.
+The browser interface exports PDFs through the browser's print dialog.
+The Dockerfile runs the same FastAPI application on port 8000.
 
 ## Validation
 
 ```powershell
-python -m pip install -r web/requirements.txt -r requirements-streamlit.txt
+python -m pip install -r requirements-dev.txt
 python -m unittest discover -s tests -v
 ```
 
 Tests cover stateless continuity across new app instances, isolation, state
 signatures/expiry, itinerary/image/reset flows, authentication, request limits,
-origin checks, provider failures, and the legacy Streamlit/PDF interface.
+origin checks, provider failures, advisor orchestration, and notebook controls.
