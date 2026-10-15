@@ -4,3 +4,6 @@
 __pycache__/
 .ipynb_checkpoints/
 .vercel/
+.venv/
+.pytest_cache/
+.ruff_cache/

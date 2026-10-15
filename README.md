@@ -5,6 +5,25 @@ Each request creates a fresh advisor. The browser sends its signed trip state
 with each request; the server keeps no sessions, conversations, image cache,
 or user files in memory between requests.
 
+## Project layout
+
+| Path | Purpose |
+|---|---|
+| `app.py` | Vercel and Docker entry point |
+| `advisor.py` | Conversation, tool calls, summaries, images, and usage tracking |
+| `itinerary_prompt.txt` | Itinerary instructions and Markdown format |
+| `web/app.py` | FastAPI routes, authentication, and signed trip state |
+| `web/templates/`, `web/static/` | Browser interface and assets |
+| `tests/` | Offline tests |
+| `*.ipynb` | Coursework interface, experiments, and test runner |
+| `model_comparison.py`, `model_comparison/` | Benchmark code and saved results |
+| `integration_smoke/` | Saved live-check results |
+| `SECURITY.md` | Security review and known limitations |
+
+Install `requirements.txt` to run the app, or `requirements-dev.txt` for tests
+and notebooks. Deployment settings live in `vercel.json`, `pyproject.toml`,
+and `Dockerfile`.
+
 ## Run locally
 
 ```powershell
@@ -35,7 +54,7 @@ selects Python 3.12.
 1. Push these changes to `zinaelnahel/ai_travel_advisor`.
 2. Import that repository in Vercel, with the repository root as Root Directory.
    Import the Services configuration from `vercel.json` and keep default
-   build/output settings. Do not add the auto-detected `web` Flask service.
+   build/output settings. The application uses one service named `app`.
 3. Add server environment variables: `OPENAI_API_KEY`, `STATE_SIGNING_SECRET`
    (a random value of at least 32 characters), `APP_PASSWORD` for private access,
    and optionally `CONVERSATION_BUDGET_USD` (default `1.0`). Use the same signing

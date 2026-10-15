@@ -1,6 +1,4 @@
-"""Optional model benchmarks; importing this module makes no API calls."""
-from advisor import MODEL_RATES, SECURITY_PROMPT, TravelAdvisor
-
+"""Compare travel plans across models using the same prompts."""
 import csv
 import json
 import random
@@ -9,6 +7,8 @@ import statistics
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from advisor import MODEL_RATES, SECURITY_PROMPT, TravelAdvisor
 
 
 CASES = [

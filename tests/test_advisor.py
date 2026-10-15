@@ -1,20 +1,17 @@
-"""Offline advisor and notebook regression tests; no paid API requests."""
-from advisor import (
-    MODEL_RATES, TravelAdvisor, external_tool, request_json,
-    safe_markdown, token_bound, validate_arguments,
-)
-
-
-from model_comparison import compare
-
-
+"""Offline tests for the advisor, benchmarks, and notebook controls."""
 import base64
 import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+from advisor import (
+    MODEL_RATES, TravelAdvisor, external_tool, request_json,
+    safe_markdown, token_bound, validate_arguments,
+)
+from model_comparison import compare
+
 
 def answer(text=None, call=None, usage=None, finish_reason="stop"):
     return {"choices": [{"message": {"content": text, **({"tool_calls": [call]} if call else {})}, "finish_reason": finish_reason}],
