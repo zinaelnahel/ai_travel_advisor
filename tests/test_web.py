@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 from itsdangerous import URLSafeTimedSerializer
 from web.app import TravelAdvisor, create_app
-from travel_errors import ServiceError, ContextLimitError
+from safarai.errors import ServiceError, ContextLimitError
 
 
 def answer(text):

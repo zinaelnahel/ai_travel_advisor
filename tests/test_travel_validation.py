@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from travel_validation import structured_budget, remove_weather_claims, qualify_routes
+from safarai.validation import structured_budget, remove_weather_claims, qualify_routes
 
 
 class ValidationTests(unittest.TestCase):

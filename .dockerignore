@@ -4,7 +4,10 @@
 __pycache__
 **/__pycache__
 .venv
-integration_smoke
-model_comparison
+experiments
+docs
+.portfolio-work
+.streamlit
+.vscode
 tests
 *.png

@@ -83,22 +83,18 @@ Once GitHub is connected, pushing to `main` triggers a deployment.
 Use `/health` to check the server and `/docs` to try the API.
 If a request fails, its reference ID can be found in Vercel Runtime Logs.
 
-## Project files and assignment features
+## Code tour
 
-| File | Purpose |
-|---|---|
-| `advisor.py` | Conversation, tool calling, model handoff, summaries and usage |
-| `itinerary_prompt.txt` | Itinerary instructions |
-| `web/` | FastAPI app and browser interface |
-| `web_research.py` | Web-search results and source validation |
-| `travel_validation.py` | Budget calculations and output checks |
-| `travel_errors.py` | Safe error categories |
-| `ai_travel_advisor.ipynb` | Notebook version of the advisor |
-| `compare_models.ipynb`, `model_comparison.py` | Model comparison experiment |
-| `model_comparison/` | Saved quality, latency and cost comparisons |
-| `SECURITY.md` | Security analysis and limitations |
-| `tests/` | Offline regression tests |
+```text
+safarai/       AI conversation, research, budgets and planning prompt
+web/           API and browser interface
+tests/         Offline regression tests
+experiments/   Optional notebooks, model comparisons and saved results
+docs/          Security analysis
+```
 
-The conversation uses `gpt-4o-mini`; planning and web research use `gpt-4.1-mini`.
+See [the security review](docs/SECURITY.md) for limitations.
+
+The conversation uses `gpt-4o-mini`; planning and research use `gpt-4.1-mini`.
 Long conversations are summarized automatically. Images are generated on request.
 Model comparisons and live-check notebooks incur API charges when run.

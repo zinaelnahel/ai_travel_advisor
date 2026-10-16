@@ -4,8 +4,8 @@ import unittest
 from urllib.error import HTTPError, URLError
 from unittest.mock import Mock, patch
 
-from advisor import request_json
-from travel_errors import ServiceError, ContextLimitError, describe_failure, provider_failure
+from safarai.advisor import request_json
+from safarai.errors import ServiceError, ContextLimitError, describe_failure, provider_failure
 
 
 class FailureTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class FailureTests(unittest.TestCase):
         error = HTTPError('https://api.openai.com/v1/chat/completions', 429, 'private', {'x-request-id': 'req_123'}, body)
         opener = Mock()
         opener.open.side_effect = error
-        with patch('advisor.build_opener', return_value=opener):
+        with patch('safarai.advisor.build_opener', return_value=opener):
             with self.assertRaises(ServiceError) as caught:
                 request_json('https://api.openai.com/v1/chat/completions')
         self.assertEqual(caught.exception.code, 'provider_quota')
@@ -37,7 +37,7 @@ class FailureTests(unittest.TestCase):
         for error, code in [(TimeoutError(), 'provider_timeout'), (URLError(TimeoutError()), 'provider_timeout'), (URLError('offline'), 'provider_connection')]:
             opener = Mock()
             opener.open.side_effect = error
-            with patch('advisor.build_opener', return_value=opener), self.assertRaises(ServiceError) as caught:
+            with patch('safarai.advisor.build_opener', return_value=opener), self.assertRaises(ServiceError) as caught:
                 request_json('https://api.openai.com/v1/chat/completions')
             self.assertEqual(caught.exception.code, code)
 

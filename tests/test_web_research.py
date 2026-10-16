@@ -2,9 +2,9 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from advisor import TravelAdvisor
-from web_research import parse_research, safe_source, MAX_SEARCH_CALLS
-from travel_validation import structured_budget
+from safarai.advisor import TravelAdvisor
+from safarai.research import parse_research, safe_source, MAX_SEARCH_CALLS
+from safarai.validation import structured_budget
 from tests.test_advisor import answer, tool_call
 
 

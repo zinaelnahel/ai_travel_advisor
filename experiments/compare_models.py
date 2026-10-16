@@ -8,8 +8,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from advisor import MODEL_RATES, SECURITY_PROMPT, TravelAdvisor
-from travel_validation import structured_budget
+from safarai.advisor import MODEL_RATES, SECURITY_PROMPT, TravelAdvisor
+from safarai.validation import structured_budget
 
 
 CASES = [
@@ -28,10 +28,10 @@ def format_checks(text, days):
         "budget_table": bool(re.search(r"\|\s*Category\s*\|\s*Estimated cost\s*\|", text)),
     }
 
-def compare(api_key, repeats=1, output_dir="model_comparison", transport=None):
+def compare(api_key, repeats=1, output_dir=None, transport=None):
     if not 1 <= repeats <= 5:
         raise ValueError("Use 1-5 repetitions.")
-    output = Path(output_dir)
+    output = Path(output_dir) if output_dir is not None else Path(__file__).resolve().parent / "results/model_comparison"
     output.mkdir(parents=True, exist_ok=True)
     kwargs = {} if transport is None else {"transport": transport}
     advisor = TravelAdvisor(api_key, budget_usd=1.0, **kwargs)

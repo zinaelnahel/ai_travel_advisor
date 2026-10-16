@@ -1,8 +1,8 @@
 import json
 import unittest
 
-from travel_validation import structured_budget
-from web_research import parse_research
+from safarai.validation import structured_budget
+from safarai.research import parse_research
 from tests.test_web_research import research_response
 
 

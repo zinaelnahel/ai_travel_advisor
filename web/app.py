@@ -19,8 +19,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadData, URLSafeTimedSerializer
 from starlette.concurrency import run_in_threadpool
 
-from advisor import TravelAdvisor, safe_markdown
-from travel_errors import describe_failure
+from safarai.advisor import TravelAdvisor, safe_markdown
+from safarai.errors import describe_failure
 
 logger = logging.getLogger('safarai.requests')
 

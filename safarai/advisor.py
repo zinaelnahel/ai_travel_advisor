@@ -8,9 +8,9 @@ import os
 import logging
 import re
 import time
-from travel_validation import remove_weather_claims, qualify_routes, structured_budget, unavailable_budget
-from web_research import SEARCH_MODEL, MAX_SEARCH_CALLS, SEARCH_CALL_USD, SEARCH_OUTPUT_TOKENS, RESEARCH_INSTRUCTIONS, parse_research, research_query, research_text, source_urls
-from travel_errors import ServiceError, ContextLimitError, provider_failure
+from safarai.validation import remove_weather_claims, qualify_routes, structured_budget, unavailable_budget
+from safarai.research import SEARCH_MODEL, MAX_SEARCH_CALLS, SEARCH_CALL_USD, SEARCH_OUTPUT_TOKENS, RESEARCH_INSTRUCTIONS, parse_research, research_query, research_text, source_urls
+from safarai.errors import ServiceError, ContextLimitError, provider_failure
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PACKAGE_ROOT = Path(__file__).resolve().parent
 
 # Standard USD / million tokens, verified 2026-10-13 from official model pages.
 # https://developers.openai.com/api/docs/models/gpt-4o-mini
@@ -239,7 +239,7 @@ class TravelAdvisor:
             raise ValueError("Choose a configured model with known pricing.")
         self.api_key = api_key
         self.manager_model, self.planner_model = manager_model, planner_model
-        self.itinerary_prompt = itinerary_prompt or (PROJECT_ROOT / "itinerary_prompt.txt").read_text(encoding="utf-8")
+        self.itinerary_prompt = itinerary_prompt or (PACKAGE_ROOT / "prompts/itinerary.txt").read_text(encoding="utf-8")
         self.transport, self.fetch = transport, fetch
         self.budget_usd = budget_usd
         self.web_search = os.getenv('WEB_SEARCH_ENABLED', '1') == '1' if web_search is None else bool(web_search)

@@ -5,6 +5,8 @@
 *.ipynb
 __pycache__
 tests
-integration_smoke
-model_comparison
-model_comparison.py
+experiments
+docs
+.portfolio-work
+.streamlit
+.vscode

@@ -6,12 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from advisor import (
+from safarai.advisor import (
     MODEL_RATES, CONTEXT_BUDGET, TravelAdvisor, external_tool, request_json,
     safe_markdown, token_bound, validate_arguments,
 )
-from model_comparison import compare
-from travel_errors import ServiceError
+from experiments.compare_models import compare
+from safarai.errors import ServiceError
 
 
 def answer(text=None, call=None, usage=None, finish_reason="stop"):
@@ -207,7 +207,7 @@ class AdvisorTests(unittest.TestCase):
         namespace = {'advisor': advisor}
         with patch('IPython.display.display'):
             namespace.update(MODEL_RATES=MODEL_RATES, safe_markdown=safe_markdown)
-            for cell in json.loads(Path('notebook_ui.ipynb').read_text(encoding='utf-8'))['cells']:
+            for cell in json.loads((Path(__file__).resolve().parents[1] / 'experiments/notebooks/notebook_ui.ipynb').read_text(encoding='utf-8'))['cells']:
                 if cell['cell_type'] == 'code':
                     exec(''.join(cell['source']), namespace)
         namespace['display'] = Mock()
@@ -223,7 +223,7 @@ class AdvisorTests(unittest.TestCase):
         advisor = self.advisor()
         namespace = {'advisor': advisor, 'MODEL_RATES': MODEL_RATES, 'safe_markdown': safe_markdown}
         with patch('IPython.display.display'):
-            for cell in json.loads(Path('notebook_ui.ipynb').read_text(encoding='utf-8'))['cells']:
+            for cell in json.loads((Path(__file__).resolve().parents[1] / 'experiments/notebooks/notebook_ui.ipynb').read_text(encoding='utf-8'))['cells']:
                 if cell['cell_type'] == 'code':
                     exec(''.join(cell['source']), namespace)
         advisor.history = [{'role': 'user', 'content': 'Old trip'}]
