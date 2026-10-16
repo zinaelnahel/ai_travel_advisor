@@ -1,12 +1,37 @@
 import json
 import unittest
+from html.parser import HTMLParser
 
 from safarai.validation import structured_budget
+from safarai.advisor import safe_markdown
 from safarai.research import parse_research
 from tests.test_web_research import research_response
 
 
 class GroupBudgetTests(unittest.TestCase):
+    def test_rendered_budget_keeps_conclusions_outside_tables(self):
+        class TableParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.in_table = False
+                self.table_text = []
+                self.row_cells = []
+            def handle_starttag(self, tag, attrs):
+                if tag == 'table': self.in_table = True
+                if tag == 'tr': self.row_cells.append(0)
+                if tag in ('td', 'th'): self.row_cells[-1] += 1
+            def handle_endtag(self, tag):
+                if tag == 'table': self.in_table = False
+            def handle_data(self, data):
+                if self.in_table: self.table_text.append(data)
+        result = safe_markdown(structured_budget(self.plan(self.data()), {}))
+        parser = TableParser()
+        parser.feed(result)
+        self.assertEqual(parser.row_cells, [5] * 7 + [2] * 7)
+        self.assertNotIn('Group cap:', ''.join(parser.table_text))
+        self.assertNotIn('Only listed items', ''.join(parser.table_text))
+        self.assertIn('<p>Estimated group total', result)
+
     def data(self):
         return {'currency': 'DKK', 'cost_basis': 'group', 'travelers': 2, 'days': 2,
                 'start_date': '2026-11-06', 'cap': {'amount': '1800', 'basis': 'group'},

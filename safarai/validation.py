@@ -286,10 +286,12 @@ def structured_budget(text, facts, trip=None):
     if group:
         output.append(f'| **Total group ({party})** | **{currency} {group_total:.2f}** |')
     output.append(f'| **Total per person** | **{currency} {per_person:.2f}** |')
-    output.append(conclusion)
+    # A blank line terminates the Markdown table. Without it, the renderer
+    # consumes conclusions and source notes as malformed one-cell table rows.
+    output.extend(['', conclusion])
     if exclusions:
-        output.append('Meals outside this estimate: ' + '; '.join(exclusions) + '.')
-    output += ['Only listed items are included; unlisted flights, insurance and other expenses are excluded. Confirm eligibility, prices and availability before booking.']
+        output.extend(['', 'Meals outside this estimate: ' + '; '.join(exclusions) + '.'])
+    output += ['', 'Only listed items are included; unlisted flights, insurance and other expenses are excluded. Confirm eligibility, prices and availability before booking.']
     if sources:
-        output.append('Sources: ' + ', '.join(sorted(sources)))
+        output.extend(['', 'Sources: ' + ', '.join(sorted(sources))])
     return '\n\n'.join([output[0], output[1], output[2], '\n'.join(output[3:])])

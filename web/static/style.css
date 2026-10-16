@@ -1058,13 +1058,17 @@ img { max-width: 100%; }
   .plan-actions, .image-note, .plan-panel > .panel-heading { display: none; }
   main { max-width: none; padding: 0; }
   .workspace { display: block; }
-  .plan-panel { min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .plan-panel { min-height: 0; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
   .itinerary { padding: 0; font-size: 11pt; }
   .itinerary h1 { font-size: 24pt; }
   .itinerary h2 { font-size: 17pt; }
   .itinerary h3 { background: transparent; border: 0; padding: 0; }
   .itinerary h1, .itinerary h2, .itinerary h3 { break-after: avoid; }
-  .itinerary table { display: table; width: 100%; font-size: 10pt; }
+  .itinerary table { display: table; width: 100%; table-layout: fixed; font-size: 9pt; overflow: visible; border-radius: 0; }
+  .itinerary td, .itinerary th, .itinerary td:last-child {
+    padding: 5px; white-space: normal; overflow-wrap: anywhere;
+  }
+  .itinerary thead { display: table-header-group; }
   .itinerary tr, figure { break-inside: avoid; }
   figure { margin: 0 0 18px; }
   figure img { max-height: 240px; border: 0; }
