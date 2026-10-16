@@ -144,11 +144,63 @@ rates do not include bank or card fees.
 
 ## Output checks and trip restoration
 
-Estimated-budget tables are parsed with Decimal arithmetic. Category sums and
-range bounds are calculated in code, and model totals and extra budget prose
-are replaced. Unsupported or ambiguous formats hide the budget total. All
-accepted rows are defined as per person for the whole trip; the estimates
-themselves remain model-generated, not verified prices.
+New complete plans provide a budget-json ledger of per-person line items,
+unit costs, quantities, categories, and an optional per-person cap. Decimal
+arithmetic calculates subtotals, category totals and the remaining buffer or
+overrun. Only this ledger renders monetary amounts; the narrative refers to
+its items. Invalid or missing ledgers get one automatic model repair attempt,
+within existing conversation spending and tool-step limits. If repair fails,
+the budget is withheld. Repair and source-review calls consume the existing
+OpenAI budget, including paid search-tool calls when enabled; no separate
+vendor billing account is needed.
+
+`venue_sources.py` maintains a deliberately limited registry for Jeronimos,
+Belem Tower and The Food Temple. When one appears in a draft, fixed official
+pages are fetched with bounded reads, no redirects and timeouts. Recognized
+standard adult admission prices override model ticket estimates in the ledger
+when the legacy lookup is used (WEB_SEARCH_ENABLED=0).
+Source changes or failures do not fall back to old prices. Food Temple's
+Mouraria address is checked against its own website. Source facts are passed
+to a revision and shown with checked dates. No arbitrary model URL is fetched.
+Exterior-only visits can be zero cost; required admission cannot silently be
+omitted from the ledger. These checks cover only the registry, not all venues.
+General prices, meal costs, taxi fares and allocation of shared costs remain
+planning estimates. No live ticket availability or discount eligibility is
+verified. A cap overrun is displayed explicitly, not claimed to be affordable.
+
+### OpenAI web research
+
+Web research is enabled by default (WEB_SEARCH_ENABLED=1) and uses the existing
+OPENAI_API_KEY. After drafting a complete plan, a focused Responses API request
+with gpt-4.1-mini searches for up to six named venues across any destination.
+It prioritizes operator and official ticket/venue websites. There is at most
+one research request per generated/revised plan and three web-search tool calls
+within that request. If search returns prose, a separate model call extracts
+structured facts from that report without another search. The planning model
+then revises the itinerary using those findings.
+
+Only facts whose URLs occur in returned search-source or citation metadata are
+accepted. This checks citation provenance, not whether a page is authoritative
+or whether AI extraction is semantically correct. The model is instructed to
+prefer official sources; source links, scope, limitations and lookup dates are
+displayed for review. Web-sourced prices override linked ledger unit costs in
+the same currency. Missing prices and detected eligibility-specific ticket
+tiers are not promoted into generic admission prices. Unknown places and
+other costs remain unverified estimates; research is not a booking quotation
+or guaranteed route/accessibility verification.
+
+Requests use store=false and send the draft/venue names, not signed state or
+API keys in search input. Research and extraction consume the existing
+CONVERSATION_BUDGET_USD. Estimates include $0.01/search call plus model tokens
+and a conservative extra 8,000 input-token allowance per search for this model;
+this can overestimate actual billing. Failed requests reserve their estimated
+cost because provider charges may still apply. This is state-based accounting,
+not an account-wide spending cap. Disable the feature with WEB_SEARCH_ENABLED=0.
+Search failure or insufficient budget is disclosed in the resulting plan.
+
+Official references, checked 2026-10-16:
+https://developers.openai.com/api/docs/guides/tools-web-search
+https://developers.openai.com/api/docs/pricing
 
 A conservative keyword filter removes model-written weather lines. Exact dated
 provider observations are rendered separately; there is no long-range forecast.
@@ -161,4 +213,5 @@ POST /api/restore verifies the signed state and renders saved messages and the
 itinerary without a model call. Session storage survives refresh in the same
 tab, not guaranteed across closed tabs or cleared browser storage. It contains
 conversation data, so New trip clears it. PDF export opens the browser print
-dialog; select Save as PDF there.
+dialog; select Save as PDF there. Restored itinerary messages use the same short
+chat acknowledgement as initial generation; the complete plan stays in its panel.

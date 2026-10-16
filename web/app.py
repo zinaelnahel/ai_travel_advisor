@@ -2,6 +2,7 @@
 import base64
 import hmac
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -135,7 +136,10 @@ def create_app(advisor_factory=None):
             if action == 'restore':
                 result = {'itinerary': advisor.last_itinerary, 'itinerary_html': safe_markdown(advisor.last_itinerary) if advisor.last_itinerary else None,
                           'destination': (advisor.last_brief or {}).get('destination'),
-                          'messages': [{'role': m['role'], 'html': safe_markdown(m['content'])} for m in advisor.history if m['role'] in ('user', 'assistant')]}
+                          'messages': [{'role': m['role'], 'html': safe_markdown(
+                              'Your adventure plan is ready! Tell me what you would like to change.'
+                              if m['role'] == 'assistant' and re.search(r'(?im)^#{1,6}\s+Day\s+\d+|^## Estimated budget', m['content'])
+                              else m['content'])} for m in advisor.history if m['role'] in ('user', 'assistant')]}
             elif action == 'reset':
                 advisor.reset()
                 result = {'reset': True}

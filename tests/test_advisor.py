@@ -22,6 +22,7 @@ def tool_call(name, **arguments):
 
 class AdvisorTests(unittest.TestCase):
     def advisor(self, *responses, **kwargs):
+        kwargs.setdefault('web_search', False)
         return TravelAdvisor("fake-key", transport=Mock(side_effect=responses), **kwargs)
 
     def test_handoff_uses_models_and_actual_constraints(self):
@@ -39,6 +40,29 @@ class AdvisorTests(unittest.TestCase):
         advisor.reply("I like museums")
         self.assertIsNone(advisor.last_itinerary)
         self.assertEqual(advisor.transport.call_count, 1)
+
+    def test_invalid_budget_gets_one_automatic_repair(self):
+        invalid = '### Day 1: Lisbon\nVisit a museum.\n## Estimated budget\nUnknown'
+        repaired = '### Day 1: Lisbon\nVisit a museum.\n## Estimated budget\n```budget-json\n' + json.dumps({'currency': 'EUR', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '40', 'quantity': '1'}]}) + '\n```'
+        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Lisbon', days=1, interests=['food'])), answer(invalid), answer(repaired))
+        result = advisor.reply('One day Lisbon, food')
+        self.assertIn('**EUR 40.00**', result)
+        self.assertNotIn('No total is shown', result)
+        self.assertEqual(advisor.transport.call_count, 3)
+
+    def test_source_review_overrides_price_and_restaurant_location(self):
+        candidate = '### Day 1: Lisbon\nDinner at The Food Temple in Chiado.\nVisit Jeronimos.'
+        ledger = {'currency': 'EUR', 'items': [{'id': 'j', 'label': 'Jeronimos admission', 'category': 'Activities', 'unit_cost': '10', 'quantity': '1', 'venue_id': 'jeronimos'}]}
+        repaired = candidate + '\n## Estimated budget\n```budget-json\n' + json.dumps(ledger) + '\n```'
+        facts = {'jeronimos': {'status': 'verified', 'name': 'Jeronimos', 'adult_entry_eur': '18', 'source_url': 'https://example.org/official', 'checked_at': '2026-10-16'},
+                 'food_temple': {'status': 'verified', 'address': 'Beco do Jasmim, 18, Mouraria, Lisbon', 'source_url': 'https://www.thefoodtemple.com/', 'checked_at': '2026-10-16'}}
+        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Lisbon', days=1, interests=['food'])), answer(candidate), answer(repaired))
+        with patch('advisor.venue_facts', return_value=facts):
+            result = advisor.reply('Lisbon one day food')
+        self.assertIn('**EUR 18.00**', result)
+        self.assertIn('Mouraria', result)
+        self.assertNotIn('Food Temple in Chiado', result)
+        self.assertEqual(result.count('**Route and access check:**'), 1)
 
     def test_external_lookup_before_handoff(self):
         lookup = tool_call("get_exchange_rate", amount=200, from_currency="EUR", to_currency="USD")

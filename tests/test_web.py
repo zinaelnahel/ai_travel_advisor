@@ -109,6 +109,15 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.transport.call_count, count)
         self.assertEqual(self.post('restore', state=first['state'] + 'tamper').status_code, 400)
 
+    def test_restore_does_not_duplicate_full_itinerary_in_chat(self):
+        first = self.post('chat', message='Hello').json()
+        signer = URLSafeTimedSerializer(os.environ['STATE_SIGNING_SECRET'], salt='safarai-state-v1')
+        state = signer.loads(first['state'])
+        state['history'].append({'role': 'assistant', 'content': '# Lisbon\n### Day 1: Museums\nFull itinerary details'})
+        response = self.post('restore', state=signer.dumps(state)).json()
+        self.assertNotIn('Full itinerary details', response['messages'][-1]['html'])
+        self.assertIn('adventure plan is ready', response['messages'][-1]['html'])
+
     def test_itinerary_and_followup_image_across_instances(self):
         call = {'id': 'call_1', 'type': 'function', 'function': {'name': 'generate_itinerary',
                 'arguments': '{"destination":"Lisbon","days":3,"interests":["food"]}'}}
