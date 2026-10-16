@@ -46,6 +46,15 @@ class AdvisorTests(unittest.TestCase):
         self.assertIsNone(advisor.last_itinerary)
         self.assertEqual(advisor.transport.call_count, 1)
 
+    def test_budget_revision_requests_planner_handoff(self):
+        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Berlin', days=2, interests=['food'])), answer(valid_plan()))
+        advisor.last_itinerary = valid_plan()
+        advisor.last_brief = {'destination': 'Berlin', 'days': 2, 'meal_allowances': {'breakfast': {'currency': 'EUR', 'amount': '10'}}}
+        advisor.reply('Revise the budget cap to EUR 220')
+        payload = advisor.transport.call_args_list[0].kwargs['payload']
+        self.assertEqual(payload['tool_choice']['function']['name'], 'generate_itinerary')
+        self.assertEqual(advisor.last_brief['meal_allowances']['breakfast']['amount'], '10')
+
     def test_handoff_preserves_traveler_count(self):
         arguments = {'destination': 'Copenhagen', 'days': 2, 'interests': ['vegetarian food'], 'travelers': 2}
         self.assertEqual(validate_arguments('generate_itinerary', arguments)['travelers'], 2)

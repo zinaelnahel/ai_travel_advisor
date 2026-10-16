@@ -10,6 +10,34 @@ def normalized(text):
     return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c)).lower()
 
 
+def explicit_meal_allowances(messages):
+    """Read explicit per-diner amounts from user text; never assistant estimates."""
+    allowances = {}
+    number = r'\d+(?:\.\d{1,2})?'
+    for message in messages:
+        if message.get('role') != 'user':
+            continue
+        text = message.get('content') or ''
+        # Group meal allowances need clarification rather than a guessed split.
+        if re.search(r'\b(?:per group|for (?:both|the group))\b', text, re.I):
+            continue
+        currencies = re.findall(r'\b(?:EGP|EUR|USD|GBP|DKK|JPY)\b|€', text, re.I)
+        currency = currencies[0].upper().replace('€', 'EUR') if len(set(c.upper() for c in currencies)) == 1 else None
+        if not currency:
+            continue
+        for meal in ('breakfast', 'lunch', 'dinner'):
+            match = re.search(r'\b' + meal + r'(?:s)?\s*(?:allowance|budget|cost)?\s*(?:of|at|is|to|=|:)?\s*(?:' + currency + r'\s*|€\s*)?(' + number + r')\b', text, re.I)
+            if match:
+                allowances[meal] = {'currency': currency, 'amount': match[1]}
+        if all(re.search(r'\b' + meal + r'\b', text, re.I) for meal in ('breakfast', 'lunch', 'dinner')):
+            triple = re.search(r'(?:' + currency + r'\s*|€\s*)(' + number + r')\s*/\s*(' + number + r')\s*/\s*(' + number + r')', text, re.I)
+            if triple:
+                order = sorted(('breakfast', 'lunch', 'dinner'), key=lambda meal: re.search(r'\b' + meal + r'\b', text, re.I).start())
+                for meal, amount in zip(order, triple.groups()):
+                    allowances[meal] = {'currency': currency, 'amount': amount}
+    return allowances
+
+
 def validation_reason(error):
     """Classify failures without logging model output or private trip data."""
     if isinstance(error, json.JSONDecodeError):
@@ -230,6 +258,15 @@ def structured_budget(text, facts, trip=None):
             admissions.add(venue_id)
             title = re.sub(r'[\[\]()*_`<>]', '', fact['name'])
             sources.add(f"[{title}]({fact['source_url']})")
+        allowance = (trip or {}).get('meal_allowances', {}).get(item.get('meal'))
+        if allowance:
+            if allowance['currency'] != currency or item.get('unit_basis') != 'per_person':
+                raise ValueError('User meal allowances require matching currency and per-person units.')
+            supplied_cost = Decimal(allowance['amount'])
+            if venue_id and facts.get(venue_id, {}).get('price_kind') == 'meal' and facts[venue_id].get('unit_price') is not None and cost != supplied_cost:
+                raise ValueError('The sourced menu differs from the user meal allowance; choose an unsourced allowance row or a compatible menu.')
+            cost = supplied_cost
+            basis = 'user-specified meal allowance; not a verified menu price'
         cost = cost.quantize(Decimal('0.01'))
         subtotal = (cost * quantity).quantize(Decimal('0.01'))
         categories[category] = categories.get(category, Decimal(0)) + subtotal

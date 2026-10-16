@@ -8,7 +8,7 @@ import os
 import logging
 import re
 import time
-from safarai.validation import remove_weather_claims, qualify_routes, structured_budget, validate_plan_format, validation_reason
+from safarai.validation import remove_weather_claims, qualify_routes, structured_budget, validate_plan_format, validation_reason, explicit_meal_allowances
 from safarai.research import SEARCH_MODEL, MAX_SEARCH_CALLS, SEARCH_CALL_USD, SEARCH_OUTPUT_TOKENS, RESEARCH_INSTRUCTIONS, parse_research, research_query, research_text, source_urls
 from safarai.errors import ServiceError, ContextLimitError, provider_failure
 from datetime import datetime, timezone
@@ -443,6 +443,7 @@ class TravelAdvisor:
 
     def planning_reply(self, conversation, brief):
         brief = dict(brief)
+        brief['meal_allowances'] = {**brief.get('meal_allowances', {}), **explicit_meal_allowances(conversation)}
         destination = re.escape(brief['destination'])
         user_constraints = '\n'.join(m.get('content') or '' for m in conversation if m.get('role') == 'user')
         brief['city_only'] = bool(re.search(r'(?:\b' + destination + r'[- ]only\b|\bonly (?:in |within )?' + destination + r'\b)', user_constraints, re.I))
@@ -534,13 +535,16 @@ class TravelAdvisor:
     def _reply(self, text):
         text = short_text(text, "Message", MAX_MESSAGE_CHARS)
         incoming = {"role": "user", "content": text}
+        has_previous_plan = bool(self.last_itinerary)
+        previous_allowances = (self.last_brief or {}).get('meal_allowances', {})
         self.last_itinerary = None
         self.last_brief = None
         self.current_sources = []
         self.compact(incoming)
         conversation = self.conversation_messages() + [incoming]
         messages = [{"role": "system", "content": MANAGER_PROMPT}, *conversation]
-        tool_choice = "auto"
+        budget_revision = has_previous_plan and bool(re.search(r'\b(budget|allowances?|costs?|cap|cheaper)\b', text, re.I))
+        tool_choice = {"type": "function", "function": {"name": "generate_itinerary"}} if budget_revision else "auto"
         for _ in range(MAX_TOOL_STEPS):
             message = self.chat(self.manager_model, messages, "conversation", tools=DATA_TOOLS + [GENERATE_TOOL], tool_choice=tool_choice)
             calls = message.get("tool_calls") or []
@@ -568,6 +572,7 @@ class TravelAdvisor:
                     messages.append({"role": "tool", "tool_call_id": call["id"], "content": '{"error":"Invalid trip brief. Correct the arguments or ask for missing information."}'})
                     continue
                 # Exclude the pending generation tool call but include preceding data lookups.
+                brief['meal_allowances'] = {**previous_allowances, **explicit_meal_allowances(conversation)}
                 reply = self.with_sources(self.planning_reply(messages[1:], brief))
                 self.last_itinerary, self.last_brief = reply, brief
                 self.history.extend([incoming, {"role": "assistant", "content": reply}])

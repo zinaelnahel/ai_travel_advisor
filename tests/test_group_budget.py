@@ -2,13 +2,34 @@ import json
 import unittest
 from html.parser import HTMLParser
 
-from safarai.validation import structured_budget
+from safarai.validation import structured_budget, explicit_meal_allowances
 from safarai.advisor import safe_markdown
 from safarai.research import parse_research
 from tests.test_web_research import research_response
 
 
 class GroupBudgetTests(unittest.TestCase):
+    def test_user_meal_allowances_override_model_estimates(self):
+        data = self.data()
+        data.update(currency='EGP', cap=None)
+        for item, cost in zip(data['items'][:3], ('35', '42.50', '80')):
+            item['unit_cost'] = cost
+        data['items'] = data['items'][:3] + [dict(id='other', label='Other costs', category='Transport', unit_cost='1000', unit_basis='per_group', occurrences=1)]
+        messages = [{'role': 'user', 'content': 'Breakfast/lunch/dinner allowances EGP 30/80/100 per person.'},
+                    {'role': 'assistant', 'content': 'Breakfast EGP 35, lunch 42.50, dinner 80.'}]
+        allowances = explicit_meal_allowances(messages)
+        result = structured_budget(self.plan(data), {}, trip={'travelers': 2, 'days': 2, 'meal_allowances': allowances})
+        self.assertIn('**EGP 1840.00**', result)
+        self.assertIn('user-specified meal allowance', result)
+        self.assertIn('| Vegetarian dinners | EGP 100.00 | 4 | EGP 400.00 |', result)
+
+    def test_latest_named_allowance_wins_without_overwriting_other_meals(self):
+        result = explicit_meal_allowances([
+            {'role': 'user', 'content': 'Breakfast EGP 30, lunch 80, dinner 100'},
+            {'role': 'user', 'content': 'Change dinner allowance to EGP 120'}])
+        self.assertEqual(result['breakfast']['amount'], '30')
+        # Explicit "to" wording is supported by the allowance extractor.
+        self.assertEqual(result['dinner']['amount'], '120')
     def test_rendered_budget_keeps_conclusions_outside_tables(self):
         class TableParser(HTMLParser):
             def __init__(self):
