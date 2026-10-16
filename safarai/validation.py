@@ -50,7 +50,7 @@ def budget_context(data, trip):
     return travelers, days, group
 
 
-def item_units(item, travelers, days, group, meals):
+def item_units(item, travelers, days, group, meals, admission=False):
     if not group:
         return Decimal(str(item['quantity']))
     basis = item.get('unit_basis')
@@ -69,6 +69,18 @@ def item_units(item, travelers, days, group, meals):
         for day in covered_days:
             meals[day, meal] = meals.get((day, meal), 0) + people
         occurrences = len(covered_days)
+    elif admission or item.get('visit_days') is not None:
+        visits = item.get('visit_days')
+        if visits is None:
+            # Older single-visit ledgers remain valid; repeated admissions need
+            # explicit visit days rather than an unexplained trip-day multiplier.
+            if item.get('occurrences') != 1:
+                raise ValueError('Admission costs require visit_days listing actual visits, not trip duration or traveler count.')
+            occurrences = 1
+        else:
+            if not isinstance(visits, list) or not visits or any(type(day) is not int or not 1 <= day <= days for day in visits) or len(set(visits)) != len(visits):
+                raise ValueError('Admission visit_days must contain distinct valid trip days.')
+            occurrences = len(visits)
     else:
         if item.get('category', '').lower() in ('food', 'meals', 'dining', 'restaurants') and not item.get('supplement'):
             raise ValueError('Main food costs must identify their meal and days; mark snacks as supplement=true.')
@@ -128,13 +140,16 @@ def structured_budget(text, facts, trip=None):
             raise ValueError('Invalid or duplicate cost item.')
         identifiers.add(identifier)
         cost = Decimal(str(item['unit_cost']))
-        quantity = item_units(item, travelers, days, group, meals)
-        if not cost.is_finite() or not quantity.is_finite() or cost < 0 or not 0 < quantity <= 1000 or cost > 1000000:
-            raise ValueError('Invalid cost or quantity.')
         basis = 'planning estimate'
         matching = [key for key, fact in facts.items() if fact.get('unit_price') is not None and normalized(fact.get('name', '')) and normalized(fact['name']) in normalized(label)]
         exterior_only = bool(re.search(r'\b(exterior|outside|exterior-only)\b', label, re.I)) and cost == 0
         venue_id = item.get('venue_id') or (matching[0] if matching and not exterior_only else None)
+        admission = (item.get('kind') == 'admission'
+                     or bool(re.search(r'\b(admission|entry|tickets?)\b', label, re.I))
+                     or facts.get(venue_id, {}).get('price_kind') == 'admission')
+        quantity = item_units(item, travelers, days, group, meals, admission=admission)
+        if not cost.is_finite() or not quantity.is_finite() or cost < 0 or not 0 < quantity <= 1000 or cost > 1000000:
+            raise ValueError('Invalid cost or quantity.')
         if venue_id:
             fact = facts.get(venue_id, {})
             if fact.get('status') == 'web_sourced' and fact.get('currency') == currency and 'unit_price' in fact:
@@ -182,6 +197,7 @@ def structured_budget(text, facts, trip=None):
     currencies = '|'.join(sorted({currency, 'EUR', 'USD', 'GBP'}))
     narrative = re.sub(r'(?:' + currencies + r'|\u20ac|\$|\u00a3)\s*\d+(?:[.,]\d+)*(?:\s*[-\u2013]\s*\d+(?:[.,]\d+)*)?', 'see cost ledger', narrative)
     narrative = re.sub(r'\d+(?:[.,]\d+)*\s*(?:' + currencies + r')\b', 'see cost ledger', narrative)
+    narrative = re.sub(r'(?i)\b(?:admission|entry|ticket price)\s+is\s+see cost ledger(?:\s+per person)?', 'Admission costs are listed in the budget below', narrative)
     party = f'{travelers} traveler' + ('s' if travelers != 1 else '')
     conclusion = f'Estimated group total for {party}: {currency} {group_total:.2f}; per person: {currency} {per_person:.2f}.'
     cap_data = data.get('cap')

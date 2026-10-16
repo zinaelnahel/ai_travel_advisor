@@ -44,6 +44,39 @@ class GroupBudgetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             structured_budget(self.plan(data), {})
 
+    def test_cairo_admissions_use_visits_while_meals_use_days(self):
+        data = self.data()
+        data.update(currency='EGP', cap=None)
+        data['items'] = data['items'][:3] + [
+            dict(id='giza', label='Giza admission', category='Activities', kind='admission', unit_cost='700', unit_basis='per_person', visit_days=[1], occurrences=2),
+            dict(id='museum', label='Egyptian Museum admission', category='Activities', kind='admission', unit_cost='550', unit_basis='per_person', visit_days=[2], occurrences=2),
+            dict(id='transport', label='Shared transport', category='Transport', unit_cost='1080', unit_basis='per_group', occurrences=1)]
+        result = structured_budget(self.plan(data), {})
+        self.assertIn('| Giza admission | EGP 700.00 | 2 | EGP 1400.00 |', result)
+        self.assertIn('| Egyptian Museum admission | EGP 550.00 | 2 | EGP 1100.00 |', result)
+        self.assertIn('| Vegetarian dinners | EGP 100.00 | 4 | EGP 400.00 |', result)
+        self.assertIn('**EGP 3980.00**', result)
+        self.assertIn('**EGP 1990.00**', result)
+
+    def test_repeated_admissions_require_explicit_valid_visit_days(self):
+        data = self.data()
+        admission = data['items'][3]
+        admission['occurrences'] = 2
+        with self.assertRaisesRegex(ValueError, 'actual visits'):
+            structured_budget(self.plan(data), {})
+        for visits in ([1, 1], [3], [True], []):
+            admission['visit_days'] = visits
+            with self.assertRaises(ValueError):
+                structured_budget(self.plan(data), {})
+        admission['visit_days'] = [1, 2]
+        self.assertIn('| Museum tickets | DKK 150.00 | 4 | DKK 600.00 |', structured_budget(self.plan(data), {}))
+
+    def test_admission_price_sentence_is_readable(self):
+        text = self.plan(self.data()).replace('Explore the city.', 'Museum admission is DKK 150 per person.')
+        result = structured_budget(text, {})
+        self.assertNotIn('is see cost ledger', result)
+        self.assertIn('Admission costs are listed in the budget below.', result)
+
     def test_trip_party_size_must_match_ledger(self):
         with self.assertRaises(ValueError):
             structured_budget(self.plan(self.data()), {}, trip={'travelers': 3, 'days': 2})
