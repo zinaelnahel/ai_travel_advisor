@@ -160,6 +160,7 @@ def create_app(advisor_factory=None):
             logger.error(json.dumps({'event': 'travel_request_failed', 'request_id': request_id,
                 'action': action, 'stage': getattr(advisor, 'stage', action), 'error_code': failure.code,
                 'exception_type': type(exc).__name__, 'provider_status': getattr(failure, 'provider_status', None),
+                'validation_reason': getattr(failure, 'validation_reason', None),
                 'context_upper_bound': getattr(advisor, 'last_context_bound', None),
                 'provider_request_id': getattr(failure, 'provider_request_id', None),
                 'elapsed_ms': round((time.perf_counter()-started)*1000)}))

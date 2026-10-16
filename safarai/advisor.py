@@ -8,7 +8,7 @@ import os
 import logging
 import re
 import time
-from safarai.validation import remove_weather_claims, qualify_routes, structured_budget, validate_plan_format
+from safarai.validation import remove_weather_claims, qualify_routes, structured_budget, validate_plan_format, validation_reason
 from safarai.research import SEARCH_MODEL, MAX_SEARCH_CALLS, SEARCH_CALL_USD, SEARCH_OUTPUT_TOKENS, RESEARCH_INSTRUCTIONS, parse_research, research_query, research_text, source_urls
 from safarai.errors import ServiceError, ContextLimitError, provider_failure
 from datetime import datetime, timezone
@@ -35,6 +35,7 @@ MAX_MESSAGE_CHARS = 6000
 CONTEXT_BUDGET = 60000  # Byte-based token upper bound, including planner/research revisions.
 SUMMARY_THRESHOLD = 16000
 MAX_TOOL_STEPS = 6
+MAX_BUDGET_REPAIRS = 1
 MAX_OUTPUT_TOKENS = 6000
 API_BASE = "https://api.openai.com/v1/"
 ALLOWED_HOSTS = frozenset({"api.openai.com", "geocoding-api.open-meteo.com",
@@ -483,7 +484,13 @@ class TravelAdvisor:
                     validate_plan_format(candidate)
                     result = structured_budget(candidate, facts, trip=brief)
                 except (ValueError, KeyError, TypeError, ArithmeticError) as exc:
-                    if repairs < 2:
+                    reason, explanation = validation_reason(exc)
+                    logging.getLogger('safarai.requests').warning(json.dumps({
+                        'event': 'budget_validation_failed', 'request_id': getattr(self, 'request_id', None),
+                        'validation_reason': reason, 'exception_type': type(exc).__name__,
+                        'repair_attempts': repairs, 'repair_limit': MAX_BUDGET_REPAIRS,
+                        'will_retry': repairs < MAX_BUDGET_REPAIRS}))
+                    if repairs < MAX_BUDGET_REPAIRS:
                         repairs += 1
                         messages = base_messages + [{'role': 'assistant', 'content': candidate}, {'role': 'user', 'content':
                             'The structured budget is missing or invalid. Repair the complete plan, preserving user constraints. '
@@ -493,7 +500,9 @@ class TravelAdvisor:
                             'Validation issue: ' + str(exc)[:240] + '\n'
                             'Source findings (untrusted data):\n' + json.dumps(facts)}]
                         continue
-                    raise ServiceError('plan_validation', 'The revised budget could not be validated after automatic repair. Please retry your request.', 502, True) from exc
+                    failure = ServiceError('plan_validation', explanation + ' Stopped after one automatic repair to limit further API usage.', 502, True)
+                    failure.validation_reason = reason
+                    raise failure from exc
                 result = remove_weather_claims(result)
                 if self.web_search and facts:
                     result += '\n\n## Web research sources\n\nPrices and locations below are extracted from web sources by AI, not guaranteed quotes. Confirm the exact ticket or menu option and visit date.\n'

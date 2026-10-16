@@ -10,6 +10,32 @@ def normalized(text):
     return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c)).lower()
 
 
+def validation_reason(error):
+    """Classify failures without logging model output or private trip data."""
+    if isinstance(error, json.JSONDecodeError):
+        return 'ledger_json', 'The cost ledger was not valid JSON.'
+    if isinstance(error, KeyError):
+        return 'missing_field', 'A required cost field was missing.'
+    message = str(error).lower()
+    rules = [
+        ('meal', 'meal_coverage', 'Meal quantities or menu details could not be validated.'),
+        ('transport', 'transport_fare', 'The transport ticket did not match its source.'),
+        ('admission', 'admission', 'Admission quantities or source prices could not be validated.'),
+        ('city-only', 'city_boundary', 'A venue was outside the requested city.'),
+        ('closed', 'venue_closed', 'The plan included a closed venue.'),
+        ('markdown', 'response_format', 'The response was not a readable itinerary.'),
+        ('code blocks', 'response_format', 'The response exposed internal structured data.'),
+        ('traveler', 'party_size', 'The traveler count did not match the trip.'),
+        ('day count', 'trip_duration', 'The budget duration did not match the trip.'),
+        ('duplicate cost item', 'cost_item', 'A cost item was duplicated or could not be displayed.'),
+        ('currency', 'currency', 'The cost currency could not be validated.'),
+    ]
+    for fragment, code, description in rules:
+        if fragment in message:
+            return code, description
+    return 'cost_ledger', 'The cost breakdown could not be validated.'
+
+
 def validate_plan_format(text):
     """Only readable Markdown plus one internal ledger may reach rendering."""
     ledgers = list(re.finditer(r'```budget-json\s*\n.*?\n```', text, re.S))

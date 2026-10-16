@@ -81,7 +81,24 @@ class AdvisorTests(unittest.TestCase):
         self.assertEqual(advisor.last_itinerary, 'Previously validated plan')
         self.assertEqual(advisor.last_brief['destination'], 'Berlin')
         self.assertEqual(advisor.history, [])
-        self.assertEqual(advisor.transport.call_count, 4)
+        self.assertEqual(advisor.transport.call_count, 3)
+
+    def test_validation_logs_reason_and_caps_unsuccessful_repairs(self):
+        invalid = '### Day 1: Urbino\nPrivate traveler detail\n## Estimated budget\nUnknown'
+        advisor = self.advisor(answer(invalid), answer(invalid), answer(valid_plan('Urbino')))
+        advisor.request_id = 'test-request-reference'
+        with self.assertLogs('safarai.requests', level='WARNING') as captured:
+            with self.assertRaises(ServiceError) as caught:
+                advisor.planning_reply([], {'destination': 'Urbino', 'days': 2, 'interests': ['museums']})
+        events = [json.loads(line.split(':', 2)[2]) for line in captured.output]
+        self.assertEqual([event['repair_attempts'] for event in events], [0, 1])
+        self.assertEqual([event['will_retry'] for event in events], [True, False])
+        self.assertTrue(all(event['request_id'] == 'test-request-reference' for event in events))
+        self.assertTrue(all(event['validation_reason'] == 'response_format' for event in events))
+        self.assertNotIn('Private traveler detail', str(captured.output))
+        self.assertEqual(advisor.transport.call_count, 2)
+        self.assertEqual(caught.exception.validation_reason, 'response_format')
+        self.assertIn('one automatic repair', str(caught.exception))
 
     def test_raw_json_revision_is_repaired_to_markdown(self):
         raw = '{"itinerary": [{"day": 1}], "budget": {"total": 220}}'
