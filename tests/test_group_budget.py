@@ -9,6 +9,15 @@ from tests.test_web_research import research_response
 
 
 class GroupBudgetTests(unittest.TestCase):
+    def test_all_missing_meals_are_reported_in_one_repair(self):
+        data = self.data()
+        data['items'] = data['items'][3:]
+        with self.assertRaises(ValueError) as caught:
+            structured_budget(self.plan(data), {})
+        for day in (1, 2):
+            for meal in ('breakfast', 'lunch', 'dinner'):
+                self.assertIn(f'day {day} {meal} covers 0/2', str(caught.exception))
+
     def test_user_meal_allowances_override_model_estimates(self):
         data = self.data()
         data.update(currency='EGP', cap=None)

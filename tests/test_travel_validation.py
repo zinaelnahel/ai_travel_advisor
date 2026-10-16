@@ -1,10 +1,25 @@
 import json
 import unittest
 
-from safarai.validation import structured_budget, remove_weather_claims, qualify_routes, validate_plan_format
+from safarai.validation import structured_budget, remove_weather_claims, qualify_routes, validate_plan_format, validation_reason
 
 
 class ValidationTests(unittest.TestCase):
+    def test_budget_failures_have_safe_specific_diagnostics(self):
+        from decimal import InvalidOperation
+        cases = [
+            (InvalidOperation('private-model-output'), 'invalid_amount'),
+            (TypeError('private-model-output'), 'field_type'),
+            (ValueError('Invalid budget cap.'), 'budget_cap'),
+            (ValueError('Each group cost needs unit_basis=per_person or per_group.'), 'cost_basis'),
+            (ValueError('Each non-meal cost needs a positive integer occurrences count.'), 'cost_occurrences'),
+            (ValueError('Invalid cost or quantity.'), 'invalid_amount'),
+        ]
+        for error, expected in cases:
+            code, message = validation_reason(error)
+            self.assertEqual(code, expected)
+            self.assertNotIn('private-model-output', message)
+
     def test_missing_duplicate_and_out_of_order_days_are_rejected(self):
         ledger = '\n```budget-json\n{}\n```'
         for numbers in ([1], [1, 1], [2, 1], [1, 3]):

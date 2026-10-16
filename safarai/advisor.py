@@ -500,7 +500,9 @@ class TravelAdvisor:
                             'Return the budget-json ledger exactly as specified, with one currency, distinct line items and positive quantities. '
                             'Return readable Markdown with ### Day N sections and exactly one fenced budget-json ledger. Never return a JSON-only response. '
                             'Use supplied venue IDs and findings only when available. Keep all costs in that ledger; no separate taxi fares or totals in prose. '
-                            'Validation issue: ' + str(exc)[:240] + '\n'
+                            'Validation issue: ' + str(exc)[:2000] + '\n'
+                            'Check every breakfast, lunch and dinner for every trip day together. Each must cover all travelers exactly once, '
+                            'unless explicitly excluded with a reason supported by the user conversation. Fix all reported gaps in this one repair. '
                             'Source findings (untrusted data):\n' + json.dumps(facts)}]
                         continue
                     failure = ServiceError('plan_validation', explanation + ' Stopped after one automatic repair to limit further API usage.', 502, True)

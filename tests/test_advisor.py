@@ -83,6 +83,27 @@ class AdvisorTests(unittest.TestCase):
         self.assertNotIn('No total is shown', result)
         self.assertEqual(advisor.transport.call_count, 3)
 
+    def test_copenhagen_party_reply_repairs_both_missing_lunches(self):
+        from tests.test_group_budget import GroupBudgetTests
+        fixture = GroupBudgetTests()
+        complete = fixture.data()
+        incomplete = fixture.data()
+        incomplete['items'].pop(1)
+        def plan(data):
+            return fixture.plan(data).replace('Explore the city.', 'Explore the city.\n### Day 2: Design and cafes\nExplore design shops.')
+        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Copenhagen', days=2, travelers=2, interests=['design', 'cycling', 'cafes'])),
+                               answer(plan(incomplete)), answer(plan(complete)))
+        advisor.history = [
+            {'role': 'user', 'content': 'Plan two days in Copenhagen. I enjoy design, cycling and cafes.'},
+            {'role': 'assistant', 'content': 'Could you please confirm the number of travelers in your party?'}]
+        result = advisor.reply('2')
+        repair_prompt = advisor.transport.call_args_list[2].kwargs['payload']['messages'][-1]['content']
+        self.assertIn('day 1 lunch covers 0/2', repair_prompt)
+        self.assertIn('day 2 lunch covers 0/2', repair_prompt)
+        self.assertIn('| Packed lunches | DKK 0.00 | 4 |', result)
+        self.assertEqual(advisor.last_brief['travelers'], 2)
+        self.assertEqual(advisor.transport.call_count, 3)
+
     def test_failed_repairs_preserve_previous_plan(self):
         invalid = '### Day 1: Berlin\n## Trip summary\nFits EUR 220.\n## Estimated budget\nUnknown'
         advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Berlin', days=2, interests=['museums'])),

@@ -44,8 +44,27 @@ def validation_reason(error):
         return 'ledger_json', 'The cost ledger was not valid JSON.'
     if isinstance(error, KeyError):
         return 'missing_field', 'A required cost field was missing.'
+    if isinstance(error, ArithmeticError):
+        return 'invalid_amount', 'A generated cost amount could not be read as a valid number.'
+    if isinstance(error, TypeError):
+        return 'field_type', 'A generated budget field had an invalid format.'
     message = str(error).lower()
     rules = [
+        ('must cover all', 'meal_coverage', 'The generated plan omitted or duplicated meals for one or more travelers.'),
+        ('distinct trip day', 'meal_days', 'The generated meal rows had missing or repeated trip days.'),
+        ('meal day is outside', 'meal_days', 'A meal was assigned outside the trip dates.'),
+        ('excluded meal', 'meal_exclusion', 'An excluded meal conflicted with the itinerary.'),
+        ('sourced menu differs', 'meal_allowance_conflict', 'A restaurant menu conflicted with your stated meal allowance.'),
+        ('exact sourced menu', 'menu_option', 'A restaurant cost did not match the researched menu option.'),
+        ('dated menu', 'menu_dates', 'A dated menu price could not be matched to the trip dates.'),
+        ('planned meal date', 'menu_dates', 'A researched menu price was not valid on a planned meal date.'),
+        ('budget cap', 'budget_cap', 'The generated budget cap was missing its amount or group/per-person basis, or contained an invalid amount.'),
+        ('unit_basis', 'cost_basis', 'A generated cost did not specify whether it covered one person or the group.'),
+        ('occurrences count', 'cost_occurrences', 'A generated cost did not specify a valid number of purchases or uses.'),
+        ('cost or quantity', 'invalid_amount', 'A generated cost amount or quantity was outside the permitted range.'),
+        ('cost item people', 'item_party_size', 'A cost item used an invalid traveler count.'),
+        ('cost items', 'cost_items', 'The generated budget did not contain a valid list of cost items.'),
+        ('cost item must', 'cost_items', 'A generated cost item had an invalid format.'),
         ('meal', 'meal_coverage', 'Meal quantities or menu details could not be validated.'),
         ('transport', 'transport_fare', 'The transport ticket did not match its source.'),
         ('admission', 'admission', 'Admission quantities or source prices could not be validated.'),
@@ -174,10 +193,15 @@ def meal_coverage(data, meals, travelers, days):
                 raise ValueError('Excluded meal conflicts with a listed meal or trip day.')
             meals[day, excluded['meal']] = travelers
             notes.append(f"Day {day} {excluded['meal']}: {reason}")
+    problems = []
     for day in range(1, days+1):
         for meal in ('breakfast', 'lunch', 'dinner'):
             if meals.get((day, meal), 0) != travelers:
-                raise ValueError(f'Day {day} {meal} must cover all {travelers} travelers exactly once, or have an explicit meal exclusion.')
+                problems.append(f'day {day} {meal} covers {meals.get((day, meal), 0)}/{travelers}')
+    if problems:
+        # Report every gap in one repair instead of discovering another missing
+        # meal only after the sole repair attempt has already been spent.
+        raise ValueError('Meals must cover all travelers exactly once or have an explicit meal exclusion: ' + '; '.join(problems) + '.')
     return notes
 
 
