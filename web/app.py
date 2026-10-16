@@ -3,6 +3,11 @@ import base64
 import hmac
 import os
 import re
+import copy
+import json
+import logging
+import time
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +21,9 @@ from starlette.concurrency import run_in_threadpool
 
 from advisor import TravelAdvisor, safe_markdown, request_json
 from urllib.parse import urlencode
+from travel_errors import describe_failure
+
+logger = logging.getLogger('safarai.requests')
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env')
@@ -132,6 +140,10 @@ def create_app(advisor_factory=None):
                     setattr(advisor, field, state[field])
             except (BadData, ValueError, TypeError):
                 return JSONResponse({'error': 'Trip state is invalid or expired. Start a new trip.'}, 400)
+        previous_state = copy.deepcopy({field: getattr(advisor, field) for field in STATE_FIELDS if field != 'metrics'})
+        request_id = uuid.uuid4().hex
+        advisor.request_id = request_id
+        started = time.perf_counter()
         try:
             if action == 'restore':
                 result = {'itinerary': advisor.last_itinerary, 'itinerary_html': safe_markdown(advisor.last_itinerary) if advisor.last_itinerary else None,
@@ -162,8 +174,24 @@ def create_app(advisor_factory=None):
             result['usage_html'] = advisor.usage_summary_html()
             result['state'] = signer.dumps({field: getattr(advisor, field) for field in STATE_FIELDS})
             return JSONResponse(result)
-        except (RuntimeError, ValueError, KeyError, TypeError):
-            return JSONResponse({'error': 'The request failed. Check API access or quota, or try a shorter request. Your itinerary remains available.'}, 502)
+        except Exception as exc:
+            # Roll back conversation/plan mutations, but retain accrued usage.
+            for field, value in previous_state.items():
+                setattr(advisor, field, value)
+            failure = describe_failure(exc)
+            logger.error(json.dumps({'event': 'travel_request_failed', 'request_id': request_id,
+                'action': action, 'stage': getattr(advisor, 'stage', action), 'error_code': failure.code,
+                'exception_type': type(exc).__name__, 'provider_status': getattr(failure, 'provider_status', None),
+                'context_upper_bound': getattr(advisor, 'last_context_bound', None),
+                'provider_request_id': getattr(failure, 'provider_request_id', None),
+                'elapsed_ms': round((time.perf_counter()-started)*1000)}))
+            has_plan = bool(advisor.last_itinerary)
+            message = str(failure) + (' Your previous itinerary is still available.' if has_plan else '')
+            return JSONResponse({'error': message, 'code': failure.code, 'retryable': failure.retryable,
+                'request_id': request_id, 'has_itinerary': has_plan,
+                'usage_html': advisor.usage_summary_html(),
+                'state': signer.dumps({field: getattr(advisor, field) for field in STATE_FIELDS})},
+                failure.status, headers={'X-Request-ID': request_id})
 
     @app.post('/api/{action}', openapi_extra={
         'requestBody': {

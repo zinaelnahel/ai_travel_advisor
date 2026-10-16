@@ -6,6 +6,28 @@ let busy = false;
 let itinerary = '';
 let hasImage = false;
 const storageKey = 'safarai-trip-v1';
+const draftKey = 'safarai-draft-v1';
+let pendingMessage = null;
+let lastFailure = '';
+function rememberDraft() {
+  try { sessionStorage.setItem(draftKey, JSON.stringify({draft: $('message').value, pending: pendingMessage, error: lastFailure, saved: Date.now()})); }
+  catch { /* Planning remains usable when browser storage is unavailable. */ }
+}
+function restoreDraft() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
+    if (!saved || Date.now() - saved.saved > 86400000) return;
+    if (typeof saved.draft === 'string') $('message').value = saved.draft.slice(0, 6000);
+    pendingMessage = typeof saved.pending === 'string' ? saved.pending.slice(0, 6000) : null;
+    lastFailure = typeof saved.error === 'string' ? saved.error.slice(0, 1500) : '';
+  } catch { /* Malformed browser data is ignored, never rendered as HTML. */ }
+}
+function showPendingMessage() {
+  if (pendingMessage) {
+    addMessage(pendingMessage, 'user');
+    addMessage(lastFailure || 'This message was not confirmed as completed. Your draft is ready to retry.', 'error');
+  }
+}
 function rememberTrip() {
   try { sessionStorage.setItem(storageKey, JSON.stringify({state: tripState, saved: Date.now()})); }
   catch { $('status').textContent = 'Trip could not be saved in this browser.'; }
@@ -55,18 +77,30 @@ function addMessage(content, kind = 'assistant') {
 }
 
 async function request(action, body = {}) {
-  const response = await fetch(`/api/${action}`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'X-Travel-Request': '1'},
-    body: JSON.stringify({...body, state: tripState}),
-  });
+  let response;
+  try {
+    response = await fetch(`/api/${action}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Travel-Request': '1'},
+      body: JSON.stringify({...body, state: tripState}),
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and retry; your message is saved in this tab.');
+  }
   if (!response.headers.get('Content-Type')?.includes('application/json')) {
+    if ([408, 504].includes(response.status)) throw new Error('The server took too long to respond. Your message is kept so you can retry.');
+    if ([401, 403].includes(response.status)) throw new Error('Sign-in is required or access was denied. Refresh to sign in; your draft is saved in this tab.');
     throw new Error('The server is unavailable or requires sign-in. Refresh and try again.');
   }
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Please try again.');
+  let data;
+  try { data = await response.json(); }
+  catch { throw new Error('The server returned an unreadable response. Your message is kept so you can retry.'); }
   if (data.state) { tripState = data.state; rememberTrip(); }
   if (data.usage_html) $('usage').innerHTML = data.usage_html;
+  if (!response.ok) {
+    const fallback = [408, 504].includes(response.status) ? 'The server took too long to respond. Please retry.' : 'The request failed. Please retry.';
+    throw new Error((typeof data.error === 'string' ? data.error : fallback) + (data.request_id ? ` Reference: ${data.request_id}` : ''));
+  }
   return data;
 }
 
@@ -86,8 +120,21 @@ $('chat-form').addEventListener('submit', event => {
   withProgress('Finding your way...', async () => {
     addMessage(message, 'user');
     $('starters').hidden = true;
-    const data = await request('chat', {message});
+    pendingMessage = message;
+    lastFailure = '';
+    rememberDraft();
+    let data;
+    try {
+      data = await request('chat', {message});
+    } catch (error) {
+      lastFailure = error.message;
+      rememberDraft();
+      throw error;
+    }
     $('message').value = '';
+    pendingMessage = null;
+    lastFailure = '';
+    rememberDraft();
 
     if (!data.itinerary) {
       addMessage(data.reply);
@@ -117,6 +164,7 @@ $('message').addEventListener('keydown', event => {
 for (const button of document.querySelectorAll('[data-prompt]')) {
   button.addEventListener('click', () => {
     $('message').value = button.dataset.prompt;
+    rememberDraft();
     $('message').focus();
   });
 }
@@ -125,7 +173,9 @@ for (const button of document.querySelectorAll('[data-prompt]')) {
 $('reset').addEventListener('click', () => {
   withProgress('Starting fresh...', async () => {
     tripState = null;
-    try { sessionStorage.removeItem(storageKey); } catch {}
+    pendingMessage = null;
+    lastFailure = '';
+    try { sessionStorage.removeItem(storageKey); sessionStorage.removeItem(draftKey); } catch {}
     $('usage').textContent = 'No requests yet.';
     itinerary = '';
     $('messages').innerHTML = greeting;
@@ -160,11 +210,12 @@ $('download').addEventListener('click', () => {
 // Restore only server-verified signed state; never trust stored HTML.
 async function restoreTrip() {
   let saved;
-  try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); } catch { return; }
-  if (!saved?.state) return;
+  try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); } catch { showPendingMessage(); return; }
+  if (!saved?.state) { showPendingMessage(); return; }
   if (Date.now() - saved.saved > 3600000) {
     $('status').textContent = 'Saved trip expired. Start a new trip.';
     try { sessionStorage.removeItem(storageKey); } catch {}
+    showPendingMessage();
     return;
   }
   tripState = saved.state;
@@ -189,5 +240,8 @@ async function restoreTrip() {
       throw new Error('Could not restore your saved trip. Refresh to retry, or choose New trip. ' + error.message);
     }
   });
+  showPendingMessage();
 }
+$('message').addEventListener('input', rememberDraft);
+restoreDraft();
 restoreTrip();

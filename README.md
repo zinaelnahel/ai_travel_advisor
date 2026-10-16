@@ -202,6 +202,35 @@ Official references, checked 2026-10-16:
 https://developers.openai.com/api/docs/guides/tools-web-search
 https://developers.openai.com/api/docs/pricing
 
+### Failure diagnostics and pending drafts
+
+API failures return a stable code, retryable flag, request_id (also in
+X-Request-ID), and has_itinerary. Authentication/access, quota, rate limiting,
+provider timeout/connection/response failures, context limits, the conversation
+cost allowance and plan validation are distinct. A previous-plan assurance is
+shown only when the signed state actually contains one. Failed turns roll back
+conversation/plan mutations while preserving accrued usage in a new signed token.
+
+Runtime logs emit safe JSON events under safarai.requests, with request ID,
+action, stage, error category, exception type, context upper bound, provider
+status/request ID when available, and elapsed time. They omit prompts, signed
+state, API keys and raw provider messages. Search failures that fall back to
+estimates also emit a categorized event linked to the request. Use Vercel
+Runtime Logs to find travel_request_failed and filter by the returned request ID.
+Deploy checks on GitHub confirm deployment state, not runtime health or logs.
+
+The Kyoto regression was reproduced locally after research: the old 24,000
+byte-based token upper-bound guard rejected a valid revision. The conservative
+guard is now 60,000, and revisions keep only the current draft rather than
+stacking every prior draft. The normal summary and cost checks still apply.
+
+Unsent drafts and pending/failed messages are stored separately in this tab's
+session storage for up to 24 hours. They survive refresh even if there is no
+successful trip token yet, are rendered as text, and are cleared on successful
+submission or New trip. Trip tokens still expire after one hour. A response
+lost after the provider completed may require retrying and incur duplicate
+charges; pending state does not claim the request was never processed remotely.
+
 A conservative keyword filter removes model-written weather lines. Exact dated
 provider observations are rendered separately; there is no long-range forecast.
 This filter is not a general semantic fact checker and may remove useful text.

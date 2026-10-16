@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 from itsdangerous import URLSafeTimedSerializer
 from web.app import TravelAdvisor, create_app
+from travel_errors import ServiceError, ContextLimitError
 
 
 def answer(text):
@@ -160,6 +161,44 @@ class WebTests(unittest.TestCase):
         response = self.post('chat', message='Hello')
         self.assertEqual(response.status_code, 502)
         self.assertNotIn('secret', response.json()['error'])
+
+    def test_failure_codes_request_reference_and_safe_logs(self):
+        for error, code, status in [(ServiceError('provider_quota', 'Provider billing allowance exhausted.', 503), 'provider_quota', 503),
+                                    (ContextLimitError('Too much planning detail.'), 'context_limit', 422),
+                                    (TimeoutError('private-provider-details'), 'provider_timeout', 504),
+                                    (ValueError('private-validation-details'), 'plan_validation', 502)]:
+            self.transport.side_effect = error
+            with self.assertLogs('safarai.requests', level='ERROR') as captured:
+                response = self.post('chat', message='private-trip-description')
+            data = response.json()
+            self.assertEqual(response.status_code, status)
+            self.assertEqual(data['code'], code)
+            self.assertEqual(data['request_id'], response.headers['X-Request-ID'])
+            self.assertFalse(data['has_itinerary'])
+            self.assertNotIn('itinerary is still available', data['error'])
+            self.assertNotIn('private', '\n'.join(captured.output))
+            self.assertIn(data['request_id'], captured.output[0])
+            self.assertEqual(self.post('restore', state=data['state']).status_code, 200)
+
+    def test_failed_revision_rolls_back_plan_but_keeps_usage(self):
+        first = self.post('chat', message='Hello').json()
+        signer = URLSafeTimedSerializer(os.environ['STATE_SIGNING_SECRET'], salt='safarai-state-v1')
+        baseline = signer.loads(first['state'])
+        baseline['last_itinerary'], baseline['last_brief'] = '# Previous Kyoto plan', {'destination': 'Kyoto'}
+        def fail(advisor, text):
+            advisor.last_itinerary = None
+            advisor.history.append({'role': 'user', 'content': 'partial failed turn'})
+            advisor.metrics.append({'model': 'gpt-4.1-mini', 'purpose': 'itinerary', 'input': 10, 'output': 10, 'cached_input': 0, 'cost_usd': .01, 'latency_s': 1, 'usage_missing': False})
+            raise ServiceError('provider_timeout', 'Planning timed out.', 504, True)
+        with patch.object(TravelAdvisor, 'reply', fail), self.assertLogs('safarai.requests', level='ERROR'):
+            response = self.post('chat', message='Change my trip', state=signer.dumps(baseline))
+        data = response.json()
+        restored = signer.loads(data['state'])
+        self.assertEqual(restored['history'], baseline['history'])
+        self.assertEqual(restored['last_itinerary'], baseline['last_itinerary'])
+        self.assertEqual(len(restored['metrics']), len(baseline['metrics'])+1)
+        self.assertTrue(data['has_itinerary'])
+        self.assertIn('previous itinerary is still available', data['error'])
 
 
 if __name__ == '__main__':

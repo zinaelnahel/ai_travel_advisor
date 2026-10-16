@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from advisor import (
-    MODEL_RATES, TravelAdvisor, external_tool, request_json,
+    MODEL_RATES, CONTEXT_BUDGET, TravelAdvisor, external_tool, request_json,
     safe_markdown, token_bound, validate_arguments,
 )
 from model_comparison import compare
@@ -49,6 +49,23 @@ class AdvisorTests(unittest.TestCase):
         self.assertIn('**EUR 40.00**', result)
         self.assertNotIn('No total is shown', result)
         self.assertEqual(advisor.transport.call_count, 3)
+
+    def test_kyoto_research_revision_fits_context_and_does_not_stack_drafts(self):
+        ledger = {'currency': 'JPY', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '3000', 'quantity': '4'}]}
+        compact = '### Day 1: Kyoto\nVisit gardens.\n## Estimated budget\n```budget-json\n' + json.dumps(ledger) + '\n```'
+        large_draft = compact.replace('Visit gardens.', 'Visit gardens and explore local culture. ' * 600)
+        invalid = compact.replace('"quantity": "4"', '"quantity": "invalid"')
+        advisor = self.advisor(answer(large_draft), answer(invalid), answer(compact), web_search=True)
+        advisor.research_venues = Mock(return_value={'garden': {'name': 'Kyoto garden', 'address': 'Kyoto', 'evidence': 'Garden address',
+            'source_url': 'https://example.org/garden', 'checked_at': '2026-10-16', 'status': 'web_sourced'}})
+        result = advisor.planning_reply([{'role': 'user', 'content': 'Four days in Kyoto, gardens and food.'}],
+                                        {'destination': 'Kyoto', 'days': 4, 'interests': ['gardens', 'food']})
+        self.assertIn('**JPY 12000.00**', result)
+        payloads = [call.kwargs['payload'] for call in advisor.transport.call_args_list]
+        self.assertGreater(token_bound(payloads[1]['messages']), 24000)
+        self.assertEqual(sum(m['role'] == 'assistant' for m in payloads[2]['messages']), 1)
+        self.assertNotIn(large_draft, [m.get('content') for m in payloads[2]['messages']])
+        self.assertIn('example.org/garden', payloads[2]['messages'][-1]['content'])
 
     def test_source_review_overrides_price_and_restaurant_location(self):
         candidate = '### Day 1: Lisbon\nDinner at The Food Temple in Chiado.\nVisit Jeronimos.'
@@ -129,7 +146,7 @@ class AdvisorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             advisor.reply('a' * 6001)
         with self.assertRaises(ValueError):
-            advisor.chat('gpt-4o-mini', [{'role': 'user', 'content': 'a' * 24000}], 'test')
+            advisor.chat('gpt-4o-mini', [{'role': 'user', 'content': 'a' * CONTEXT_BUDGET}], 'test')
         advisor.budget_usd = 0
         with self.assertRaises(RuntimeError):
             advisor.reply('hello')
