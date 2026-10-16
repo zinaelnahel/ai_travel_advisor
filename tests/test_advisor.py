@@ -65,6 +65,20 @@ class AdvisorTests(unittest.TestCase):
         self.assertNotIn('No total is shown', result)
         self.assertEqual(advisor.transport.call_count, 3)
 
+    def test_failed_repairs_preserve_previous_plan(self):
+        invalid = '### Day 1: Berlin\n## Trip summary\nFits EUR 220.\n## Estimated budget\nUnknown'
+        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Berlin', days=2, interests=['museums'])),
+                               answer(invalid), answer(invalid), answer(invalid))
+        advisor.last_itinerary = 'Previously validated plan'
+        advisor.last_brief = {'destination': 'Berlin', 'days': 2}
+        with self.assertRaises(ServiceError) as caught:
+            advisor.reply('Reduce the budget to EUR 220')
+        self.assertEqual(caught.exception.code, 'plan_validation')
+        self.assertEqual(advisor.last_itinerary, 'Previously validated plan')
+        self.assertEqual(advisor.last_brief['destination'], 'Berlin')
+        self.assertEqual(advisor.history, [])
+        self.assertEqual(advisor.transport.call_count, 4)
+
     def test_kyoto_research_revision_fits_context_and_does_not_stack_drafts(self):
         ledger = {'currency': 'JPY', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '3000', 'quantity': '4'}]}
         compact = '### Day 1: Kyoto\nVisit gardens.\n## Estimated budget\n```budget-json\n' + json.dumps(ledger) + '\n```'

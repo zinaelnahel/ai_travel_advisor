@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock
 
 from safarai.advisor import TravelAdvisor
-from safarai.research import parse_research, safe_source, MAX_SEARCH_CALLS
+from safarai.research import parse_research, research_query, safe_source, MAX_SEARCH_CALLS
 from safarai.validation import structured_budget
 from tests.test_advisor import answer, tool_call
 
@@ -25,6 +25,31 @@ def draft():
 
 
 class WebResearchTests(unittest.TestCase):
+    def test_transport_research_preserves_product_and_closure_status(self):
+        response = research_response(price='28.50')
+        content = response['output'][1]['content'][0]
+        data = json.loads(content['text'])
+        fact = data['facts'][0]
+        fact.update(price_kind='transport', price_scope='standard adult AB 48h pass', price_option='Adult AB 48h', operating_status='unknown')
+        content['text'] = json.dumps(data)
+        parsed = parse_research(response)['museum']
+        self.assertEqual(parsed['price_kind'], 'transport')
+        self.assertEqual(parsed['unit_price'], '28.50')
+        fact['price_option'] = None
+        content['text'] = json.dumps(data)
+        self.assertNotIn('unit_price', parse_research(response)['museum'])
+        fact.update(operating_status='permanently_closed', unit_price=None)
+        content['text'] = json.dumps(data)
+        self.assertEqual(parse_research(response)['museum']['operating_status'], 'permanently_closed')
+
+    def test_transport_targets_are_included_even_when_venues_fill_limit(self):
+        ledger = {'research_venues': ['Museum ' + str(i) for i in range(6)],
+                  'items': [{'label': 'WelcomeCard AB 48h', 'category': 'Transport'}]}
+        query = research_query('```budget-json\n' + json.dumps(ledger) + '\n```', 'Berlin')
+        self.assertIn('WelcomeCard AB 48h', query)
+        self.assertIn('transport fares', query)
+        self.assertIn('Berlin', research_query('```budget-json\ninvalid\n```', 'Berlin'))
+
     def test_sourced_facts_and_price_override_outside_lisbon(self):
         facts = parse_research(research_response())
         output = structured_budget(draft(), facts)

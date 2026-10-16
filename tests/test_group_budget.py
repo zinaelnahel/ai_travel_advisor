@@ -77,6 +77,28 @@ class GroupBudgetTests(unittest.TestCase):
         self.assertNotIn('is see cost ledger', result)
         self.assertIn('Admission costs are listed in the budget below.', result)
 
+    def test_transport_uses_exact_sourced_product_and_price(self):
+        data = self.data()
+        transport = data['items'][4]
+        transport.update(label='WelcomeCard AB 48h', venue_id='pass', unit_cost='26.80', price_option='Adult AB 48h')
+        fact = dict(name='WelcomeCard AB 48h', status='web_sourced', currency='DKK', unit_price='28.50',
+                    price_kind='transport', price_option='Adult AB 48h', source_url='https://example.org/fares', checked_at='2026-10-16')
+        self.assertIn('| WelcomeCard AB 48h | DKK 28.50 | 2 | DKK 57.00 |', structured_budget(self.plan(data), {'pass': fact}))
+        transport['price_option'] = 'Adult ABC 48h'
+        with self.assertRaisesRegex(ValueError, 'exact sourced fare'):
+            structured_budget(self.plan(data), {'pass': fact})
+
+    def test_closed_restaurant_is_rejected_even_without_ledger_reference(self):
+        text = self.plan(self.data()).replace('Explore the city.', 'Dinner at Kopps.')
+        with self.assertRaisesRegex(ValueError, 'permanently closed'):
+            structured_budget(text, {'kopps': {'name': 'Kopps', 'operating_status': 'permanently_closed'}})
+
+    def test_model_exchange_rate_is_removed_before_cost_replacement(self):
+        text = self.plan(self.data()).replace('Explore the city.', 'Exchange rate is EUR 1 = DKK 7.46.\nExplore the city.')
+        result = structured_budget(text, {})
+        self.assertNotIn('Exchange rate is', result)
+        self.assertIn('Explore the city.', result)
+
     def test_trip_party_size_must_match_ledger(self):
         with self.assertRaises(ValueError):
             structured_budget(self.plan(self.data()), {}, trip={'travelers': 3, 'days': 2})

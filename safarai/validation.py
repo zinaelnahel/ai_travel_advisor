@@ -130,6 +130,9 @@ def structured_budget(text, facts, trip=None):
         raise ValueError('Missing or excessive cost items.')
     rows, categories, identifiers, sources, admissions = [], {}, set(), set(), set()
     meals = {}
+    for fact in facts.values():
+        if fact.get('operating_status') == 'permanently_closed' and fact.get('name') and normalized(fact['name']) in normalized(text[:match.start()]):
+            raise ValueError('A permanently closed venue is still recommended; remove it and revise the ledger.')
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise ValueError('Every cost item must be an object.')
@@ -145,16 +148,28 @@ def structured_budget(text, facts, trip=None):
         exterior_only = bool(re.search(r'\b(exterior|outside|exterior-only)\b', label, re.I)) and cost == 0
         venue_id = item.get('venue_id') or (matching[0] if matching and not exterior_only else None)
         admission = (item.get('kind') == 'admission'
-                     or bool(re.search(r'\b(admission|entry|tickets?)\b', label, re.I))
+                     or (category.lower() != 'transport' and bool(re.search(r'\b(admission|entry|tickets?)\b', label, re.I)))
                      or facts.get(venue_id, {}).get('price_kind') == 'admission')
         quantity = item_units(item, travelers, days, group, meals, admission=admission)
         if not cost.is_finite() or not quantity.is_finite() or cost < 0 or not 0 < quantity <= 1000 or cost > 1000000:
             raise ValueError('Invalid cost or quantity.')
         if venue_id:
             fact = facts.get(venue_id, {})
+            if fact.get('operating_status') == 'permanently_closed':
+                raise ValueError('A permanently closed venue cannot be included in the cost ledger.')
             if fact.get('status') == 'web_sourced' and fact.get('currency') == currency and 'unit_price' in fact:
                 if group and item.get('unit_basis') != 'per_person':
                     raise ValueError('Sourced adult ticket and individual menu prices require unit_basis=per_person.')
+                if fact.get('price_kind') == 'transport':
+                    if not item.get('price_option') or item['price_option'] != fact.get('price_option'):
+                        raise ValueError('Transport must match the exact sourced fare, zones and duration using price_option.')
+                    if fact.get('valid_from') or fact.get('valid_until'):
+                        if not data.get('start_date'):
+                            raise ValueError('Dated transport fares require a trip start_date.')
+                        start = date.fromisoformat(data['start_date'])
+                        end = (start + timedelta(days=days-1)).isoformat()
+                        if fact.get('valid_from') and start.isoformat() < fact['valid_from'] or fact.get('valid_until') and end > fact['valid_until']:
+                            raise ValueError('Transport fare validity does not cover the trip.')
                 if fact.get('price_kind') == 'meal':
                     if not item.get('meal') or not item.get('price_option') or item['price_option'] != fact.get('price_option'):
                         raise ValueError('The restaurant cost must match the exact sourced menu option.')
@@ -194,6 +209,7 @@ def structured_budget(text, facts, trip=None):
     # Eliminate independent model totals/taxi fares elsewhere. The named ledger
     # items below retain every numerical cost and explain category differences.
     narrative = re.split(r'(?im)^## Estimated budget\s*$', text[:match.start()])[0]
+    narrative = '\n'.join(line for line in narrative.splitlines() if not re.search(r'\b(exchange rate|currency conversion)\b', line, re.I))
     currencies = '|'.join(sorted({currency, 'EUR', 'USD', 'GBP'}))
     narrative = re.sub(r'(?:' + currencies + r'|\u20ac|\$|\u00a3)\s*\d+(?:[.,]\d+)*(?:\s*[-\u2013]\s*\d+(?:[.,]\d+)*)?', 'see cost ledger', narrative)
     narrative = re.sub(r'\d+(?:[.,]\d+)*\s*(?:' + currencies + r')\b', 'see cost ledger', narrative)
