@@ -37,6 +37,36 @@ class WebTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("frame-ancestors 'none'", response.headers['Content-Security-Policy'])
 
+    def test_public_tools_without_ai_configuration(self):
+        with patch.dict(os.environ, {'OPENAI_API_KEY': '', 'STATE_SIGNING_SECRET': ''}), patch('web.app.request_json', return_value={'results': []}) as fetch:
+            self.assertEqual(self.client.get('/api/places?name=Lisbon').json(), {'results': []})
+            self.assertIn('name=Lisbon', fetch.call_args.args[0])
+            self.assertEqual(self.client.get('/api/forecast?latitude=38.7&longitude=-9.1').status_code, 200)
+            self.assertIn('forecast_days=16', fetch.call_args.args[0])
+            self.assertEqual(self.client.get('/api/rate?currency=USD').status_code, 200)
+            self.assertEqual(fetch.call_args.args[0], 'https://api.frankfurter.dev/v2/rate/EUR/USD')
+            self.assertEqual(fetch.call_args.kwargs['timeout'], 10)
+
+    def test_public_tool_validation_failure_and_auth(self):
+        with patch('web.app.request_json') as fetch:
+            for path in ['/api/places?name=x', '/api/forecast?latitude=91&longitude=0', '/api/forecast?latitude=nan&longitude=0', '/api/rate?currency=../../secret']:
+                self.assertEqual(self.client.get(path).status_code, 422)
+            fetch.assert_not_called()
+            fetch.side_effect = RuntimeError('private provider detail')
+            response = self.client.get('/api/places?name=Lisbon')
+            self.assertEqual(response.status_code, 502)
+            self.assertNotIn('private', response.text)
+        with patch.dict(os.environ, {'APP_PASSWORD': 'password'}):
+            self.assertEqual(self.client.get('/api/rate?currency=USD').status_code, 401)
+
+    def test_home_keeps_simple_chat_and_itinerary(self):
+        page = self.client.get('/').text
+        self.assertNotIn('id="lookup-city"', page)
+        self.assertIn('id="chat-form"', page)
+        self.assertIn('id="itinerary"', page)
+        self.assertNotIn('id="trip-form"', page)
+        self.assertNotIn('id="trip-start"', page)
+
     def test_conversation_survives_new_app_instance_without_cookies(self):
         first = self.post('chat', message='Hello').json()
         self.client = TestClient(create_app(self.factory))

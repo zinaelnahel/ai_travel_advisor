@@ -119,7 +119,8 @@ for (const button of document.querySelectorAll('[data-prompt]')) {
 // Reset the signed conversation and the displayed trip together.
 $('reset').addEventListener('click', () => {
   withProgress('Starting fresh...', async () => {
-    await request('reset');
+    tripState = null;
+    $('usage').textContent = 'No requests yet.';
     itinerary = '';
     $('messages').innerHTML = greeting;
     $('message').value = '';

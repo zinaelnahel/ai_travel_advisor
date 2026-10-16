@@ -124,3 +124,18 @@ python -m unittest discover -s tests -v
 Tests cover stateless continuity across new app instances, isolation, state
 signatures/expiry, itinerary/image/reset flows, authentication, request limits,
 origin checks, provider failures, advisor orchestration, and notebook controls.
+
+## Public data APIs
+
+The interface focuses on travel chat and itineraries. The separate destination
+lookup and currency panel has been removed. The AI advisor can still use its
+weather and currency tools during conversation.
+
+The keyless GET endpoints /api/places?name=Lisbon,
+/api/forecast?latitude=38.7&longitude=-9.1 and /api/rate?currency=USD remain
+available to API clients. They validate inputs, use fixed HTTPS providers,
+disable redirects, and apply a 10-second timeout. App password protection applies.
+Open-Meteo's free API is for noncommercial use and requires attribution:
+https://open-meteo.com/en/terms . Frankfurter reference rates are free and keyless:
+https://frankfurter.dev/ . Forecasts cover the upcoming 16 days, and exchange
+rates do not include bank or card fees.

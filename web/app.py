@@ -6,14 +6,15 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Header, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadData, URLSafeTimedSerializer
 from starlette.concurrency import run_in_threadpool
 
-from advisor import TravelAdvisor, safe_markdown
+from advisor import TravelAdvisor, safe_markdown, request_json
+from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env')
@@ -87,6 +88,27 @@ def create_app(advisor_factory=None):
     @app.get('/health')
     def health():
         return {'status': 'ok'}
+
+    def public_data(url):
+        try:
+            return request_json(url, timeout=10)
+        except (RuntimeError, ValueError):
+            return JSONResponse({'error': 'The public data provider is unavailable. Please try again.'}, 502)
+
+    @app.get('/api/places')
+    def places(name: str = Query(min_length=2, max_length=100)):
+        return public_data('https://geocoding-api.open-meteo.com/v1/search?' + urlencode(
+            {'name': name, 'count': 5, 'language': 'en', 'format': 'json'}))
+
+    @app.get('/api/forecast')
+    def forecast(latitude: float = Query(ge=-90, le=90), longitude: float = Query(ge=-180, le=180)):
+        return public_data('https://api.open-meteo.com/v1/forecast?' + urlencode({
+            'latitude': latitude, 'longitude': longitude, 'timezone': 'auto', 'forecast_days': 16,
+            'daily': 'temperature_2m_max,temperature_2m_min,precipitation_probability_max'}))
+
+    @app.get('/api/rate')
+    def rate(currency: str = Query(pattern='^[A-Z]{3}$')):
+        return public_data('https://api.frankfurter.dev/v2/rate/EUR/' + currency)
 
     def process(action, body):
         try:
