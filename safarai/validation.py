@@ -10,6 +10,18 @@ def normalized(text):
     return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c)).lower()
 
 
+def validate_plan_format(text):
+    """Only readable Markdown plus one internal ledger may reach rendering."""
+    ledgers = list(re.finditer(r'```budget-json\s*\n.*?\n```', text, re.S))
+    if len(ledgers) != 1:
+        raise ValueError('Return a Markdown itinerary with exactly one fenced budget-json ledger, not a JSON response.')
+    prose = text[:ledgers[0].start()] + text[ledgers[0].end():]
+    if not re.search(r'(?im)^###\s+Day\s+\d+', prose):
+        raise ValueError('The Markdown itinerary needs readable ### Day N sections.')
+    if re.search(r'(?m)^\s*(?:[\[{]|```)', prose):
+        raise ValueError('Internal JSON or code blocks must not appear outside the budget-json ledger.')
+
+
 def unavailable_budget():
     return '## Estimated budget\n\nThe cost estimates could not be validated. Ask for a revised budget with one currency and an amount or range for each category. No total is shown.\n'
 
@@ -131,6 +143,8 @@ def structured_budget(text, facts, trip=None):
     rows, categories, identifiers, sources, admissions = [], {}, set(), set(), set()
     meals = {}
     for fact in facts.values():
+        if trip and trip.get('city_only') and fact.get('city') and normalized(fact['city']) != normalized(trip['destination']) and fact.get('name') and normalized(fact['name']) in normalized(text):
+            raise ValueError('A venue is outside the requested city-only boundary; remove it from the plan and ledger.')
         if fact.get('operating_status') == 'permanently_closed' and fact.get('name') and normalized(fact['name']) in normalized(text[:match.start()]):
             raise ValueError('A permanently closed venue is still recommended; remove it and revise the ledger.')
     for index, item in enumerate(items):

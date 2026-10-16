@@ -18,6 +18,10 @@ def answer(text=None, call=None, usage=None, finish_reason="stop"):
     return {"choices": [{"message": {"content": text, **({"tool_calls": [call]} if call else {})}, "finish_reason": finish_reason}],
             "usage": usage or {"prompt_tokens": 100, "completion_tokens": 20, "prompt_tokens_details": {"cached_tokens": 40}}}
 
+def valid_plan(title='Berlin'):
+    return '# ' + title + '\n### Day 1: Explore\nExplore the city.\n## Estimated budget\n```budget-json\n' + json.dumps({'currency': 'EUR', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '40', 'quantity': '1'}]}) + '\n```'
+
+
 def tool_call(name, **arguments):
     return {"id": "call_1", "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}
 
@@ -27,7 +31,7 @@ class AdvisorTests(unittest.TestCase):
         return TravelAdvisor("fake-key", transport=Mock(side_effect=responses), **kwargs)
 
     def test_handoff_uses_models_and_actual_constraints(self):
-        advisor = self.advisor(answer(call=tool_call("generate_itinerary", destination="Berlin", days=2, interests=["museums"])), answer("# Berlin plan"))
+        advisor = self.advisor(answer(call=tool_call("generate_itinerary", destination="Berlin", days=2, interests=["museums"])), answer(valid_plan()))
         text = advisor.reply("Two days in Berlin, museums, wheelchair access, vegetarian food")
         calls = advisor.transport.call_args_list
         self.assertEqual([c.kwargs['payload']['model'] for c in calls], ['gpt-4o-mini', 'gpt-4.1-mini'])
@@ -79,6 +83,26 @@ class AdvisorTests(unittest.TestCase):
         self.assertEqual(advisor.history, [])
         self.assertEqual(advisor.transport.call_count, 4)
 
+    def test_raw_json_revision_is_repaired_to_markdown(self):
+        raw = '{"itinerary": [{"day": 1}], "budget": {"total": 220}}'
+        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Riccione', days=2, interests=['food'])),
+                               answer(raw), answer(valid_plan('Riccione')))
+        result = advisor.reply('Riccione-only stops, please')
+        self.assertIn('### Day 1', result)
+        self.assertIn('| **Total per person**', result)
+        self.assertNotIn('budget-json', result)
+        self.assertNotIn(raw, result)
+
+    def test_json_and_incomplete_markdown_never_replace_previous_plan(self):
+        for invalid in ('{"budget":220}', '```json\n{"budget":220}\n```', '# Riccione\nA nice trip.'):
+            advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Riccione', days=2, interests=['food'])),
+                                   answer(invalid), answer(invalid), answer(invalid))
+            advisor.last_itinerary = valid_plan('Riccione')
+            previous = advisor.last_itinerary
+            with self.assertRaises(ServiceError):
+                advisor.reply('Revise the trip')
+            self.assertEqual(advisor.last_itinerary, previous)
+
     def test_kyoto_research_revision_fits_context_and_does_not_stack_drafts(self):
         ledger = {'currency': 'JPY', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '3000', 'quantity': '4'}]}
         compact = '### Day 1: Kyoto\nVisit gardens.\n## Estimated budget\n```budget-json\n' + json.dumps(ledger) + '\n```'
@@ -98,7 +122,7 @@ class AdvisorTests(unittest.TestCase):
 
     def test_external_lookup_before_handoff(self):
         lookup = tool_call("get_exchange_rate", amount=200, from_currency="EUR", to_currency="USD")
-        advisor = self.advisor(answer(call=lookup), answer(call=tool_call("generate_itinerary", destination="Berlin", days=2, interests=["museums"])), answer("# Berlin"),
+        advisor = self.advisor(answer(call=lookup), answer(call=tool_call("generate_itinerary", destination="Berlin", days=2, interests=["museums"])), answer(valid_plan()),
                                fetch=Mock(return_value={"result": "success", "rates": {"USD": 1.1}, "time_last_update_utc": "today"}))
         advisor.reply("Berlin, 2 days, museums, convert EUR 200 to USD")
         planner_messages = advisor.transport.call_args_list[2].kwargs['payload']['messages']
@@ -217,7 +241,7 @@ class AdvisorTests(unittest.TestCase):
             self.assertTrue(Path(directory, 'review.csv').exists())
 
     def test_notebook_controls_restore_after_image_failure(self):
-        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Lisbon', days=2, interests=['food'])), answer('# Lisbon'), RuntimeError('image unavailable'))
+        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Lisbon', days=2, interests=['food'])), answer(valid_plan('Lisbon')), RuntimeError('image unavailable'))
         namespace = {'advisor': advisor}
         with patch('IPython.display.display'):
             namespace.update(MODEL_RATES=MODEL_RATES, safe_markdown=safe_markdown)

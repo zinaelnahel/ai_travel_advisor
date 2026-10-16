@@ -93,6 +93,19 @@ class GroupBudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'permanently closed'):
             structured_budget(text, {'kopps': {'name': 'Kopps', 'operating_status': 'permanently_closed'}})
 
+    def test_city_only_rejects_sourced_neighboring_municipality(self):
+        text = self.plan(self.data()).replace('Explore the city.', 'Visit Museo della Regina.')
+        with self.assertRaisesRegex(ValueError, 'city-only'):
+            structured_budget(text, {'museum': {'name': 'Museo della Regina', 'city': 'Cattolica'}},
+                              trip={'destination': 'Riccione', 'city_only': True, 'travelers': 2, 'days': 2})
+
+    def test_official_free_entry_overrides_estimated_admission(self):
+        data = self.data()
+        data['items'][3]['venue_id'] = 'museum'
+        fact = dict(name='Museum', unit_price='0', currency='DKK', status='web_sourced', price_kind='admission',
+                    source_url='https://example.org/museum', checked_at='2026-10-16')
+        self.assertIn('| Museum tickets | DKK 0.00 | 2 | DKK 0.00 |', structured_budget(self.plan(data), {'museum': fact}))
+
     def test_model_exchange_rate_is_removed_before_cost_replacement(self):
         text = self.plan(self.data()).replace('Explore the city.', 'Exchange rate is EUR 1 = DKK 7.46.\nExplore the city.')
         result = structured_budget(text, {})

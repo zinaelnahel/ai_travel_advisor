@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from itsdangerous import URLSafeTimedSerializer
 from web.app import TravelAdvisor, create_app
 from safarai.errors import ServiceError, ContextLimitError
+from tests.test_advisor import valid_plan
 
 
 def answer(text):
@@ -22,7 +23,7 @@ class WebTests(unittest.TestCase):
         self.transport = Mock(return_value=answer('Where to?'))
 
         def factory():
-            advisor = TravelAdvisor('fake-key', transport=self.transport, itinerary_prompt='Plan a trip.')
+            advisor = TravelAdvisor('fake-key', transport=self.transport, itinerary_prompt='Plan a trip.', web_search=False)
             self.advisors.append(advisor)
             return advisor
         self.factory = factory
@@ -88,6 +89,21 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.transport.call_count, count)
         self.assertEqual(self.post('restore', state=first['state'] + 'tamper').status_code, 400)
 
+    def test_json_revision_failure_preserves_plan_after_refresh(self):
+        from tests.test_advisor import answer as model_answer, tool_call
+        first = self.post('chat', message='Hello').json()
+        signer = URLSafeTimedSerializer(os.environ['STATE_SIGNING_SECRET'], salt='safarai-state-v1')
+        baseline = signer.loads(first['state'])
+        baseline['last_itinerary'] = valid_plan('Riccione')
+        baseline['last_brief'] = {'destination': 'Riccione', 'days': 2, 'interests': ['food']}
+        self.transport.side_effect = [model_answer(call=tool_call('generate_itinerary', destination='Riccione', days=2, interests=['food'])),
+                                      answer('{"budget":220}'), answer('{"budget":220}'), answer('{"budget":220}')]
+        failed = self.post('chat', message='Riccione-only please', state=signer.dumps(baseline))
+        self.assertEqual(failed.status_code, 502)
+        self.assertTrue(failed.json()['has_itinerary'])
+        restored = self.post('restore', state=failed.json()['state']).json()
+        self.assertEqual(restored['itinerary'], baseline['last_itinerary'])
+
     def test_restore_does_not_duplicate_full_itinerary_in_chat(self):
         first = self.post('chat', message='Hello').json()
         signer = URLSafeTimedSerializer(os.environ['STATE_SIGNING_SECRET'], salt='safarai-state-v1')
@@ -102,7 +118,7 @@ class WebTests(unittest.TestCase):
                 'arguments': '{"destination":"Lisbon","days":3,"interests":["food"]}'}}
         self.transport.side_effect = [
             {'choices': [{'message': {'content': None, 'tool_calls': [call]}, 'finish_reason': 'stop'}]},
-            answer('# Lisbon\nA lovely trip.')]
+            answer(valid_plan('Lisbon'))]
         plan = self.post('chat', message='Lisbon, 3 days, food').json()
         self.assertEqual(plan['destination'], 'Lisbon')
         self.assertIn('<h1>', plan['itinerary_html'])

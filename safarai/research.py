@@ -17,7 +17,7 @@ official ticket office, museum authority or official tourism board. Check the ex
 Do not use remembered prices, reseller prices, inferred discounts or unsupported route/accessibility claims.
 Research at most six important attractions, restaurants and transport products, including named passes and single tickets. Check operator closure notices for named restaurants; do not recommend permanently closed venues. Unknown facts must stay unknown.
 Return one JSON object, optionally fenced as json, with a facts array. Each fact has:
-id (short ASCII snake_case), name, address (string or null), neighborhood (string or null),
+id (short ASCII snake_case), name, address (string or null), neighborhood (string or null), city (actual municipality, string or null),
 currency (ISO currency or null), unit_price (decimal string or null),
 price_kind (admission, meal or transport), price_option (exact named ticket/menu/pass option or null),
 operating_status (open, permanently_closed or unknown; only mark closed with explicit operator evidence),
@@ -27,6 +27,7 @@ evidence (short factual paraphrase including the price basis and relevant date/l
 unit_price must price ONE adult ticket, ONE transport pass or ONE diner's menu, not a party total.
 For transport match exact zones, duration and adult fare; include these in price_option and price_scope. Use the official transit operator's current fare table, not remembered fares. Never substitute a group ticket for an individual fare.
 For admission use standard adult entry, never a from-price, bundle or discounted ticket.
+If the official operator states admission is free, return unit_price="0". Check actual municipality rather than assuming the destination; neighboring towns are not the same city.
 For restaurants research the exact dietary menu and course count in the plan, not another menu, wine pairing or a generic meal estimate.
 Only provide a restaurant price when the operator lists that exact menu; include its exact option name and published validity dates.
 Use null if the correct ticket or menu option is uncertain. Cite the actual pages you used.
@@ -125,7 +126,7 @@ def parse_research(response):
             continue
         if not all(isinstance(item.get(field, ''), str) and len(item.get(field, '')) <= limit for field, limit in [('name', 150), ('evidence', 700)]):
             continue
-        record = {field: item.get(field) for field in ['name', 'address', 'neighborhood', 'currency', 'price_scope', 'price_option', 'valid_from', 'valid_until', 'evidence']}
+        record = {field: item.get(field) for field in ['name', 'address', 'neighborhood', 'city', 'currency', 'price_scope', 'price_option', 'valid_from', 'valid_until', 'evidence']}
         if any(v is not None and (not isinstance(v, str) or len(v) > 700) for v in record.values()):
             continue
         record.update(source_url=url, checked_at=checked, status='web_sourced')
