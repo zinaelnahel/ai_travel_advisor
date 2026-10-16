@@ -34,19 +34,38 @@ function rememberTrip() {
 }
 
 // Keep requests sequential and show progress beside the input.
-async function withProgress(label, action) {
+async function withProgress(label, action, showPlanLoading = false) {
   if (busy) return;
   busy = true;
   document.querySelectorAll('button').forEach(button => button.disabled = true);
   $('message').disabled = true;
   $('status').textContent = label;
   document.querySelector('.chat-panel').setAttribute('aria-busy', 'true');
+  let loadingReminder;
+  if (showPlanLoading) {
+    $('plan-loading-title').textContent = itinerary ? 'Working on your changes...' : 'Working on your adventure...';
+    $('plan-loading-detail').textContent = itinerary
+      ? 'Your current itinerary stays available while we prepare a reply.'
+      : 'We are preparing your reply. Detailed itineraries can take a little longer.';
+    $('plan-loading').hidden = false;
+    $('empty-plan').hidden = true;
+    document.querySelector('.plan-panel').setAttribute('aria-busy', 'true');
+    loadingReminder = setTimeout(() => {
+      $('plan-loading-detail').textContent = 'Still working on your request. You can leave this tab open while it finishes.';
+    }, 15000);
+  }
 
   try {
     await action();
   } catch (error) {
     addMessage(error.message, 'error');
   } finally {
+    clearTimeout(loadingReminder);
+    if (showPlanLoading) {
+      $('plan-loading').hidden = true;
+      $('empty-plan').hidden = Boolean(itinerary);
+      document.querySelector('.plan-panel').setAttribute('aria-busy', 'false');
+    }
     busy = false;
     document.querySelectorAll('button').forEach(button => button.disabled = false);
     $('image-button').disabled = hasImage;
@@ -151,7 +170,7 @@ $('chat-form').addEventListener('submit', event => {
     if (window.matchMedia('(max-width: 800px)').matches) {
       document.querySelector('.plan-panel').scrollIntoView({block: 'start'});
     }
-  });
+  }, true);
 });
 
 $('message').addEventListener('keydown', event => {

@@ -410,6 +410,33 @@ form {
   min-height: 595px;
 }
 
+.plan-loading:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 20px;
+  padding: 20px;
+  border: 1px solid #d8c9ec;
+  border-radius: 16px;
+  background: #f6f0fc;
+}
+.plan-loading p { margin: 0; line-height: 1.6; }
+.plan-loading p:first-child { font-weight: 700; }
+.plan-loading p + p { margin-top: 5px; font-size: 13px; color: var(--muted); }
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 3px solid #dfd1ee;
+  border-top-color: #7956a2;
+  border-radius: 50%;
+  animation: loading-spin 1s linear infinite;
+}
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner { animation: none; }
+}
+
 /* Empty itinerary illustration */
 .empty-plan {
   text-align: center;
@@ -1055,7 +1082,7 @@ img { max-width: 100%; }
   @page { margin: 18mm; }
   body { background: white; color: #222; font-family: Arial, sans-serif; }
   .topbar, .intro, .setup-note, .chat-panel, footer,
-  .plan-actions, .image-note, .plan-panel > .panel-heading { display: none; }
+  .plan-actions, .image-note, .plan-panel > .panel-heading, .plan-loading { display: none !important; }
   main { max-width: none; padding: 0; }
   .workspace { display: block; }
   .plan-panel { min-height: 0; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
