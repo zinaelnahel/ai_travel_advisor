@@ -47,6 +47,21 @@ class WebTests(unittest.TestCase):
         self.post('chat', message='Unrelated browser')
         self.assertEqual(len(self.advisors[-1].history), 2)
 
+    def test_swagger_schema_policy_and_authentication(self):
+        docs = self.client.get('/docs')
+        self.assertEqual(docs.status_code, 200)
+        self.assertIn('/static/swagger.js', docs.text)
+        self.assertIn('https://cdn.jsdelivr.net', docs.headers['Content-Security-Policy'])
+        self.assertNotIn('https://cdn.jsdelivr.net', self.client.get('/').headers['Content-Security-Policy'])
+        self.assertEqual(self.client.get('/static/swagger.js').status_code, 200)
+        operation = self.client.get('/openapi.json').json()['paths']['/api/{action}']['post']
+        self.assertIn('application/json', operation['requestBody']['content'])
+        self.assertTrue(any(p['name'] == 'x-travel-request' for p in operation['parameters']))
+        with patch.dict(os.environ, {'APP_PASSWORD': 'password'}):
+            for path in ['/docs', '/openapi.json', '/static/swagger.js']:
+                self.assertEqual(self.client.get(path).status_code, 401)
+                self.assertEqual(self.client.get(path, auth=('user', 'password')).status_code, 200)
+
     def test_tampered_and_expired_state(self):
         state = self.post('chat', message='Hi').json()['state']
         self.assertEqual(self.post('chat', message='Hi', state=state + 'tampered').status_code, 400)

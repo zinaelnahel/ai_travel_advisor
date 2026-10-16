@@ -3,10 +3,11 @@ import base64
 import hmac
 import os
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Header, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadData, URLSafeTimedSerializer
@@ -24,6 +25,15 @@ def create_app(advisor_factory=None):
     app = FastAPI(title='SafarAI API', docs_url=None, redoc_url=None)
     app.mount('/static', StaticFiles(directory=ROOT / 'web/static'), name='static')
     templates = Jinja2Templates(directory=ROOT / 'web/templates')
+
+    @app.get('/docs', include_in_schema=False, response_class=HTMLResponse)
+    def docs():
+        return HTMLResponse('''<!DOCTYPE html>
+<html><head><title>SafarAI API — Swagger UI</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+</head><body><div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+<script src="/static/swagger.js"></script></body></html>''')
 
     def serializer():
         secret = os.getenv('STATE_SIGNING_SECRET', '')
@@ -60,6 +70,13 @@ def create_app(advisor_factory=None):
             'Referrer-Policy': 'same-origin',
             'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'",
         })
+        if request.url.path == '/docs':
+            response.headers['Content-Security-Policy'] = (
+                "default-src 'self'; img-src 'self' data:; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "script-src 'self' https://cdn.jsdelivr.net; "
+                "frame-ancestors 'none'; base-uri 'self'"
+            )
         return response
 
     @app.get('/')
@@ -118,8 +135,24 @@ def create_app(advisor_factory=None):
         except (RuntimeError, ValueError, KeyError, TypeError):
             return JSONResponse({'error': 'The request failed. Check API access or quota, or try a shorter request. Your itinerary remains available.'}, 502)
 
-    @app.post('/api/{action}')
-    async def api(action: str, request: Request):
+    @app.post('/api/{action}', openapi_extra={
+        'requestBody': {
+            'required': True,
+            'content': {'application/json': {
+                'schema': {'type': 'object', 'properties': {
+                    'message': {'type': 'string', 'description': 'Required for chat (1–6,000 characters).'},
+                    'state': {'type': 'string', 'description': 'Signed state returned by the previous request; required for image.'},
+                }},
+                'examples': {
+                    'chat': {'value': {'message': 'Three days in Lisbon, interested in food'}},
+                    'reset': {'value': {}},
+                    'image': {'value': {'state': 'PASTE_PREVIOUS_RESPONSE_STATE'}},
+                },
+            }},
+        },
+    })
+    async def api(action: Literal['chat', 'reset', 'image'], request: Request,
+                  x_travel_request: str = Header(default='1', description='Must be 1.')):
         if action not in ('chat', 'reset', 'image'):
             return JSONResponse({'error': 'Unknown action.'}, 404)
         size = 0

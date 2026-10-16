@@ -69,6 +69,13 @@ does not publish the app.
 
 ## API contract and state
 
+Open `/docs` on the deployed domain (or locally) for Swagger UI and `/openapi.json`
+for the schema. Swagger sends the required request header automatically. If
+`APP_PASSWORD` is configured, sign in using the browser's Basic authentication
+prompt. Choose an action and matching JSON example, then use **Try it out**.
+Pass the returned `state` into subsequent requests. Swagger assets load from
+jsDelivr; the relaxed asset policy applies only to `/docs`.
+
 `GET /health` is public. `POST /api/chat`, `/api/image`, and `/api/reset`
 accept JSON and require `X-Travel-Request: 1`. When a password is configured,
 send HTTP Basic authentication. Browser requests must come from the same origin.
