@@ -5,6 +5,11 @@ const greeting = $('messages').innerHTML;
 let busy = false;
 let itinerary = '';
 let hasImage = false;
+const storageKey = 'safarai-trip-v1';
+function rememberTrip() {
+  try { sessionStorage.setItem(storageKey, JSON.stringify({state: tripState, saved: Date.now()})); }
+  catch { $('status').textContent = 'Trip could not be saved in this browser.'; }
+}
 
 // Keep requests sequential and show progress beside the input.
 async function withProgress(label, action) {
@@ -60,7 +65,7 @@ async function request(action, body = {}) {
   }
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Please try again.');
-  if (data.state) tripState = data.state;
+  if (data.state) { tripState = data.state; rememberTrip(); }
   if (data.usage_html) $('usage').innerHTML = data.usage_html;
   return data;
 }
@@ -120,6 +125,7 @@ for (const button of document.querySelectorAll('[data-prompt]')) {
 $('reset').addEventListener('click', () => {
   withProgress('Starting fresh...', async () => {
     tripState = null;
+    try { sessionStorage.removeItem(storageKey); } catch {}
     $('usage').textContent = 'No requests yet.';
     itinerary = '';
     $('messages').innerHTML = greeting;
@@ -150,3 +156,38 @@ $('download').addEventListener('click', () => {
   if (!itinerary) return;
   window.print();
 });
+
+// Restore only server-verified signed state; never trust stored HTML.
+async function restoreTrip() {
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); } catch { return; }
+  if (!saved?.state) return;
+  if (Date.now() - saved.saved > 3600000) {
+    $('status').textContent = 'Saved trip expired. Start a new trip.';
+    try { sessionStorage.removeItem(storageKey); } catch {}
+    return;
+  }
+  tripState = saved.state;
+  await withProgress('Restoring your trip...', async () => {
+    try {
+      const data = await request('restore');
+      $('messages').innerHTML = greeting;
+      for (const message of data.messages || []) {
+        const wrapper = document.createElement('div'); wrapper.innerHTML = message.html;
+        addMessage(message.role === 'user' ? wrapper.textContent : message.html, message.role);
+      }
+      $('starters').hidden = Boolean(data.messages?.length);
+      if (data.itinerary) {
+        itinerary = data.itinerary;
+        $('itinerary').innerHTML = data.itinerary_html;
+        $('plan-heading').textContent = `Your ${data.destination || 'next'} adventure`;
+        $('empty-plan').hidden = true; $('plan-content').hidden = false;
+      }
+    } catch (error) {
+      tripState = null;
+      // Keep the saved token on transient errors so refreshing can retry.
+      throw new Error('Could not restore your saved trip. Refresh to retry, or choose New trip. ' + error.message);
+    }
+  });
+}
+restoreTrip();

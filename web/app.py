@@ -115,10 +115,10 @@ def create_app(advisor_factory=None):
             signer = serializer()
         except RuntimeError as exc:
             return JSONResponse({'error': str(exc)}, 503)
-        if not advisor_factory and not os.getenv('OPENAI_API_KEY'):
+        if action != 'restore' and not advisor_factory and not os.getenv('OPENAI_API_KEY'):
             return JSONResponse({'error': 'Configure OPENAI_API_KEY on the server.'}, 503)
         advisor = advisor_factory() if advisor_factory else TravelAdvisor(
-            os.environ['OPENAI_API_KEY'], budget_usd=float(os.getenv('CONVERSATION_BUDGET_USD', '1')))
+            os.getenv('OPENAI_API_KEY', ''), budget_usd=float(os.getenv('CONVERSATION_BUDGET_USD', '1')))
         token = body.get('state')
         if token is not None and action != 'reset':
             try:
@@ -132,7 +132,11 @@ def create_app(advisor_factory=None):
             except (BadData, ValueError, TypeError):
                 return JSONResponse({'error': 'Trip state is invalid or expired. Start a new trip.'}, 400)
         try:
-            if action == 'reset':
+            if action == 'restore':
+                result = {'itinerary': advisor.last_itinerary, 'itinerary_html': safe_markdown(advisor.last_itinerary) if advisor.last_itinerary else None,
+                          'destination': (advisor.last_brief or {}).get('destination'),
+                          'messages': [{'role': m['role'], 'html': safe_markdown(m['content'])} for m in advisor.history if m['role'] in ('user', 'assistant')]}
+            elif action == 'reset':
                 advisor.reset()
                 result = {'reset': True}
             elif action == 'image':
@@ -173,9 +177,9 @@ def create_app(advisor_factory=None):
             }},
         },
     })
-    async def api(action: Literal['chat', 'reset', 'image'], request: Request,
+    async def api(action: Literal['chat', 'reset', 'image', 'restore'], request: Request,
                   x_travel_request: str = Header(default='1', description='Must be 1.')):
-        if action not in ('chat', 'reset', 'image'):
+        if action not in ('chat', 'reset', 'image', 'restore'):
             return JSONResponse({'error': 'Unknown action.'}, 404)
         size = 0
         chunks = []

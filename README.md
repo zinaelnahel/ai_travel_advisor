@@ -87,8 +87,10 @@ next JSON request. Chat also returns sanitized `reply`, optional `itinerary`,
 state containing an itinerary. Reset returns an empty signed trip state.
 
 Tokens expire after one hour of inactivity. State is signed, not encrypted:
-it contains the conversation and usage but never the API key. The page keeps it
-in memory; refreshing starts a new trip. Images remain in the page and are not
+it contains the conversation and usage but never the API key. The page stores the signed token in browser session storage so a refresh in the
+same tab restores the trip. The server verifies its signature and one-hour expiry
+before rendering saved content. New trip removes the saved token. Closing the
+tab ends the browser session; generated images are not restored. Images remain in the page and are not
 cached on the server. API clients should keep requests sequential and retain
 an image locally to avoid paying for duplicate generation.
 
@@ -139,3 +141,24 @@ Open-Meteo's free API is for noncommercial use and requires attribution:
 https://open-meteo.com/en/terms . Frankfurter reference rates are free and keyless:
 https://frankfurter.dev/ . Forecasts cover the upcoming 16 days, and exchange
 rates do not include bank or card fees.
+
+## Output checks and trip restoration
+
+Estimated-budget tables are parsed with Decimal arithmetic. Category sums and
+range bounds are calculated in code, and model totals and extra budget prose
+are replaced. Unsupported or ambiguous formats hide the budget total. All
+accepted rows are defined as per person for the whole trip; the estimates
+themselves remain model-generated, not verified prices.
+
+A conservative keyword filter removes model-written weather lines. Exact dated
+provider observations are rendered separately; there is no long-range forecast.
+This filter is not a general semantic fact checker and may remove useful text.
+Routing has no verification API: prompts avoid uncertain restaurant locations,
+common precise walking-time/nearby claims are qualified, and plans disclose
+that routes and accessibility require confirmation. No route is certified.
+
+POST /api/restore verifies the signed state and renders saved messages and the
+itinerary without a model call. Session storage survives refresh in the same
+tab, not guaranteed across closed tabs or cleared browser storage. It contains
+conversation data, so New trip clears it. PDF export opens the browser print
+dialog; select Save as PDF there.

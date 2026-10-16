@@ -171,7 +171,8 @@ class AdvisorTests(unittest.TestCase):
         namespace['display'] = Mock()
         namespace['message_box'].value = 'Two days in Lisbon, food'
         namespace['send_message'](None)
-        self.assertEqual(advisor.last_itinerary, '# Lisbon')
+        self.assertTrue(advisor.last_itinerary.startswith('# Lisbon'))
+        self.assertIn('not verified routes', advisor.last_itinerary)
         self.assertFalse(namespace['send_button'].disabled)
         self.assertFalse(namespace['reset_button'].disabled)
         self.assertEqual(namespace['message_box'].value, '')

@@ -99,6 +99,16 @@ class WebTests(unittest.TestCase):
             expired = self.post('reset').json()['state']
         self.assertEqual(self.post('chat', message='Hi', state=expired).status_code, 400)
 
+    def test_restore_signed_trip_without_model_call(self):
+        first = self.post('chat', message='Hello').json()
+        count = self.transport.call_count
+        with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
+            restored = self.post('restore', state=first['state'])
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()['messages'][0]['role'], 'user')
+        self.assertEqual(self.transport.call_count, count)
+        self.assertEqual(self.post('restore', state=first['state'] + 'tamper').status_code, 400)
+
     def test_itinerary_and_followup_image_across_instances(self):
         call = {'id': 'call_1', 'type': 'function', 'function': {'name': 'generate_itinerary',
                 'arguments': '{"destination":"Lisbon","days":3,"interests":["food"]}'}}
