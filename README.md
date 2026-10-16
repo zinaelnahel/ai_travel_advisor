@@ -1,246 +1,104 @@
-﻿# SafarAI
+# SafarAI
 
-SafarAI uses a stateless FastAPI backend with a responsive browser interface.
-Each request creates a fresh advisor. The browser sends its signed trip state
-with each request; the server keeps no sessions, conversations, image cache,
-or user files in memory between requests.
-
-## Project layout
-
-| Path | Purpose |
-|---|---|
-| `app.py` | Vercel and Docker entry point |
-| `advisor.py` | Conversation, tool calls, summaries, images, and usage tracking |
-| `itinerary_prompt.txt` | Itinerary instructions and Markdown format |
-| `web/app.py` | FastAPI routes, authentication, and signed trip state |
-| `web/templates/`, `web/static/` | Browser interface and assets |
-| `tests/` | Offline tests |
-| `*.ipynb` | Coursework interface, experiments, and test runner |
-| `model_comparison.py`, `model_comparison/` | Benchmark code and saved results |
-| `integration_smoke/` | Saved live-check results |
-| `SECURITY.md` | Security review and known limitations |
-
-Install `requirements.txt` to run the app, or `requirements-dev.txt` for tests
-and notebooks. Deployment settings live in `vercel.json`, `pyproject.toml`,
-and `Dockerfile`.
+An AI travel advisor that turns a conversation into a personalized itinerary.
+Tell it where you want to go, how long you are staying, and what you enjoy.
 
 ## Run locally
 
-```powershell
-python -m pip install -r requirements.txt
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
+You need Python 3.12 and an OpenAI API key with available credit.
 
-Copy `.env.example` to `.env`, set `OPENAI_API_KEY`, and put the generated value
-in `STATE_SIGNING_SECRET`. Then run:
+1. Install dependencies:
 
-```powershell
-python -m web.app
-```
+   ```powershell
+   python -m pip install -r requirements.txt
+   ```
 
-Open http://127.0.0.1:8000. Set `APP_PASSWORD` to protect a private deployment.
+2. Copy `.env.example` to `.env`:
 
-## Deploy to Vercel
+   ```powershell
+   Copy-Item .env.example .env
+   ```
 
-The root `app.py` exports the FastAPI application using Vercel's supported
-entrypoint. `vercel.json` explicitly declares one FastAPI service named `app`,
-routes all public paths to it, and allows up to 300 seconds per function invocation.
-The root `app.py` imports `web.app`; these are two entry points for the same
-application, not independent services. No internal service calls or bindings
-are needed. Browser requests keep their existing `/api/` paths.
-Root `requirements.txt` contains only API dependencies, and `pyproject.toml`
-selects Python 3.12.
+3. Edit `.env`. Set `OPENAI_API_KEY` and `STATE_SIGNING_SECRET`.
+   Generate a signing secret with:
 
-1. Push these changes to `zinaelnahel/ai_travel_advisor`.
-2. Import that repository in Vercel, with the repository root as Root Directory.
-   Import the Services configuration from `vercel.json` and keep default
-   build/output settings. The application uses one service named `app`.
-3. Add server environment variables: `OPENAI_API_KEY`, `STATE_SIGNING_SECRET`
-   (a random value of at least 32 characters), `APP_PASSWORD` for private access,
-   and optionally `CONVERSATION_BUDGET_USD` (default `1.0`). Use the same signing
-   secret across instances of a deployment. Never put secrets in Git or browser code.
-4. Deploy. Verify `https://<your-project>.vercel.app/health` returns
-   `{"status":"ok"}`, then open `/` and test chat.
+   ```powershell
+   python -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
 
-With a logged-in Vercel CLI, deploy from this directory with `vercel --prod`.
-See [Vercel's FastAPI documentation](https://vercel.com/docs/frameworks/backend/fastapi).
-Deployment requires Vercel account/project access; adding configuration alone
-does not publish the app.
+4. Start the app:
 
-## API contract and state
+   ```powershell
+   python -m web.app
+   ```
 
-Open `/docs` on the deployed domain (or locally) for Swagger UI and `/openapi.json`
-for the schema. Swagger sends the required request header automatically. If
-`APP_PASSWORD` is configured, sign in using the browser's Basic authentication
-prompt. Choose an action and matching JSON example, then use **Try it out**.
-Pass the returned `state` into subsequent requests. Swagger assets load from
-jsDelivr; the relaxed asset policy applies only to `/docs`.
+5. Open **http://127.0.0.1:8000**.
 
-`GET /health` is public. `POST /api/chat`, `/api/image`, and `/api/reset`
-accept JSON and require `X-Travel-Request: 1`. When a password is configured,
-send HTTP Basic authentication. Browser requests must come from the same origin.
+## What it does
 
-Start chat with `{"message":"Three days in Lisbon, interested in food"}`.
-Every successful action returns `state`; pass it unchanged as `state` in the
-next JSON request. Chat also returns sanitized `reply`, optional `itinerary`,
-`itinerary_html`, `destination`, and `usage_html`. Image generation requires a
-state containing an itinerary. Reset returns an empty signed trip state.
+- Asks for missing trip details and remembers the conversation.
+- Creates and revises daily plans with tips and group/per-person budgets.
+- Searches the web for venue prices and locations, with source links.
+- Looks up weather and exchange rates when needed.
+- Restores trips and unfinished messages after refreshing the same tab.
+- Offers optional destination images and **Print / Save PDF**.
+- Shows estimated token usage and API costs.
 
-Tokens expire after one hour of inactivity. State is signed, not encrypted:
-it contains the conversation and usage but never the API key. The page stores the signed token in browser session storage so a refresh in the
-same tab restores the trip. The server verifies its signature and one-hour expiry
-before rendering saved content. New trip removes the saved token. Closing the
-tab ends the browser session; generated images are not restored. Images remain in the page and are not
-cached on the server. API clients should keep requests sequential and retain
-an image locally to avoid paying for duplicate generation.
+Trips expire after one hour of inactivity. Closing the tab may clear saved data.
+Images are not restored. For PDF export, choose **Save as PDF** in the print dialog.
 
-Stateless tokens can be replayed or discarded. Conversation budgets are an
-estimate for the supplied state, not account-wide billing limits or replay
-protection. Configure provider spending limits and deployment access controls
-as appropriate. Long model/tool chains can exceed the function duration, and
-large generated images can exceed Vercel's response-size limit; failed requests
-may still incur provider costs. Rotating the signing secret invalidates old trips.
+## Settings
 
-## Notebooks and coursework
+Set these in `.env` locally or in Vercel's environment variables:
 
-The notebooks, model comparison reports, and saved integration results remain
-as coursework evidence. Install the development dependencies to run notebooks:
+| Setting | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Required OpenAI API key |
+| `STATE_SIGNING_SECRET` | Required random secret, at least 32 characters |
+| `APP_PASSWORD` | Optional password; use it before sharing the app |
+| `CONVERSATION_BUDGET_USD` | Estimated AI allowance per trip; default `1.0` |
+| `WEB_SEARCH_ENABLED` | `1` to research venues; `0` to skip web research |
 
-```powershell
-python -m pip install -r requirements-dev.txt
-```
+OpenAI chat, web search and images cost money. The trip allowance is an estimate,
+not an account-wide spending limit. Keep `.env` and API keys out of Git.
+Prices, routes and accessibility still need confirmation before booking.
+Meal quantities are calculated from travelers and days. Shared costs and
+per-person prices are kept separate; the summary uses the calculated totals.
 
-Open `ai_travel_advisor.ipynb` for the notebook interface. Notebooks import
-`advisor.py` directly; `compare_models.ipynb` uses `model_comparison.py`.
-Model comparisons and live checks incur API charges when explicitly enabled.
-The browser interface exports PDFs through the browser's print dialog.
-The Dockerfile runs the same FastAPI application on port 8000.
-
-## Validation
+## Tests
 
 ```powershell
 python -m pip install -r requirements-dev.txt
 python -m unittest discover -s tests -v
 ```
 
-Tests cover stateless continuity across new app instances, isolation, state
-signatures/expiry, itinerary/image/reset flows, authentication, request limits,
-origin checks, provider failures, advisor orchestration, and notebook controls.
+These tests use mocked responses and do not make paid API calls.
 
-## Public data APIs
+## Deploy
 
-The interface focuses on travel chat and itineraries. The separate destination
-lookup and currency panel has been removed. The AI advisor can still use its
-weather and currency tools during conversation.
+Import this GitHub repository into Vercel, add the settings above, and deploy.
+The repository already contains the FastAPI deployment configuration.
+Once GitHub is connected, pushing to `main` triggers a deployment.
 
-The keyless GET endpoints /api/places?name=Lisbon,
-/api/forecast?latitude=38.7&longitude=-9.1 and /api/rate?currency=USD remain
-available to API clients. They validate inputs, use fixed HTTPS providers,
-disable redirects, and apply a 10-second timeout. App password protection applies.
-Open-Meteo's free API is for noncommercial use and requires attribution:
-https://open-meteo.com/en/terms . Frankfurter reference rates are free and keyless:
-https://frankfurter.dev/ . Forecasts cover the upcoming 16 days, and exchange
-rates do not include bank or card fees.
+Use `/health` to check the server and `/docs` to try the API.
+If a request fails, its reference ID can be found in Vercel Runtime Logs.
 
-## Output checks and trip restoration
+## Project files and assignment features
 
-New complete plans provide a budget-json ledger of per-person line items,
-unit costs, quantities, categories, and an optional per-person cap. Decimal
-arithmetic calculates subtotals, category totals and the remaining buffer or
-overrun. Only this ledger renders monetary amounts; the narrative refers to
-its items. Invalid or missing ledgers get one automatic model repair attempt,
-within existing conversation spending and tool-step limits. If repair fails,
-the budget is withheld. Repair and source-review calls consume the existing
-OpenAI budget, including paid search-tool calls when enabled; no separate
-vendor billing account is needed.
+| File | Purpose |
+|---|---|
+| `advisor.py` | Conversation, tool calling, model handoff, summaries and usage |
+| `itinerary_prompt.txt` | Itinerary instructions |
+| `web/` | FastAPI app and browser interface |
+| `web_research.py` | Web-search results and source validation |
+| `travel_validation.py` | Budget calculations and output checks |
+| `travel_errors.py` | Safe error categories |
+| `ai_travel_advisor.ipynb` | Notebook version of the advisor |
+| `compare_models.ipynb`, `model_comparison.py` | Model comparison experiment |
+| `model_comparison/` | Saved quality, latency and cost comparisons |
+| `SECURITY.md` | Security analysis and limitations |
+| `tests/` | Offline regression tests |
 
-`venue_sources.py` maintains a deliberately limited registry for Jeronimos,
-Belem Tower and The Food Temple. When one appears in a draft, fixed official
-pages are fetched with bounded reads, no redirects and timeouts. Recognized
-standard adult admission prices override model ticket estimates in the ledger
-when the legacy lookup is used (WEB_SEARCH_ENABLED=0).
-Source changes or failures do not fall back to old prices. Food Temple's
-Mouraria address is checked against its own website. Source facts are passed
-to a revision and shown with checked dates. No arbitrary model URL is fetched.
-Exterior-only visits can be zero cost; required admission cannot silently be
-omitted from the ledger. These checks cover only the registry, not all venues.
-General prices, meal costs, taxi fares and allocation of shared costs remain
-planning estimates. No live ticket availability or discount eligibility is
-verified. A cap overrun is displayed explicitly, not claimed to be affordable.
-
-### OpenAI web research
-
-Web research is enabled by default (WEB_SEARCH_ENABLED=1) and uses the existing
-OPENAI_API_KEY. After drafting a complete plan, a focused Responses API request
-with gpt-4.1-mini searches for up to six named venues across any destination.
-It prioritizes operator and official ticket/venue websites. There is at most
-one research request per generated/revised plan and three web-search tool calls
-within that request. If search returns prose, a separate model call extracts
-structured facts from that report without another search. The planning model
-then revises the itinerary using those findings.
-
-Only facts whose URLs occur in returned search-source or citation metadata are
-accepted. This checks citation provenance, not whether a page is authoritative
-or whether AI extraction is semantically correct. The model is instructed to
-prefer official sources; source links, scope, limitations and lookup dates are
-displayed for review. Web-sourced prices override linked ledger unit costs in
-the same currency. Missing prices and detected eligibility-specific ticket
-tiers are not promoted into generic admission prices. Unknown places and
-other costs remain unverified estimates; research is not a booking quotation
-or guaranteed route/accessibility verification.
-
-Requests use store=false and send the draft/venue names, not signed state or
-API keys in search input. Research and extraction consume the existing
-CONVERSATION_BUDGET_USD. Estimates include $0.01/search call plus model tokens
-and a conservative extra 8,000 input-token allowance per search for this model;
-this can overestimate actual billing. Failed requests reserve their estimated
-cost because provider charges may still apply. This is state-based accounting,
-not an account-wide spending cap. Disable the feature with WEB_SEARCH_ENABLED=0.
-Search failure or insufficient budget is disclosed in the resulting plan.
-
-Official references, checked 2026-10-16:
-https://developers.openai.com/api/docs/guides/tools-web-search
-https://developers.openai.com/api/docs/pricing
-
-### Failure diagnostics and pending drafts
-
-API failures return a stable code, retryable flag, request_id (also in
-X-Request-ID), and has_itinerary. Authentication/access, quota, rate limiting,
-provider timeout/connection/response failures, context limits, the conversation
-cost allowance and plan validation are distinct. A previous-plan assurance is
-shown only when the signed state actually contains one. Failed turns roll back
-conversation/plan mutations while preserving accrued usage in a new signed token.
-
-Runtime logs emit safe JSON events under safarai.requests, with request ID,
-action, stage, error category, exception type, context upper bound, provider
-status/request ID when available, and elapsed time. They omit prompts, signed
-state, API keys and raw provider messages. Search failures that fall back to
-estimates also emit a categorized event linked to the request. Use Vercel
-Runtime Logs to find travel_request_failed and filter by the returned request ID.
-Deploy checks on GitHub confirm deployment state, not runtime health or logs.
-
-The Kyoto regression was reproduced locally after research: the old 24,000
-byte-based token upper-bound guard rejected a valid revision. The conservative
-guard is now 60,000, and revisions keep only the current draft rather than
-stacking every prior draft. The normal summary and cost checks still apply.
-
-Unsent drafts and pending/failed messages are stored separately in this tab's
-session storage for up to 24 hours. They survive refresh even if there is no
-successful trip token yet, are rendered as text, and are cleared on successful
-submission or New trip. Trip tokens still expire after one hour. A response
-lost after the provider completed may require retrying and incur duplicate
-charges; pending state does not claim the request was never processed remotely.
-
-A conservative keyword filter removes model-written weather lines. Exact dated
-provider observations are rendered separately; there is no long-range forecast.
-This filter is not a general semantic fact checker and may remove useful text.
-Routing has no verification API: prompts avoid uncertain restaurant locations,
-common precise walking-time/nearby claims are qualified, and plans disclose
-that routes and accessibility require confirmation. No route is certified.
-
-POST /api/restore verifies the signed state and renders saved messages and the
-itinerary without a model call. Session storage survives refresh in the same
-tab, not guaranteed across closed tabs or cleared browser storage. It contains
-conversation data, so New trip clears it. PDF export opens the browser print
-dialog; select Save as PDF there. Restored itinerary messages use the same short
-chat acknowledgement as initial generation; the complete plan stays in its panel.
+The conversation uses `gpt-4o-mini`; planning and web research use `gpt-4.1-mini`.
+Long conversations are summarized automatically. Images are generated on request.
+Model comparisons and live-check notebooks incur API charges when run.

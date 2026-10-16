@@ -2,47 +2,12 @@
 import re
 import json
 from decimal import Decimal
-from venue_sources import CATALOG, normalized
+import unicodedata
+from datetime import date, timedelta
 
 
-def calculated_budget(text):
-    match = re.search(r"(?im)^## Estimated budget\s*$", text)
-    if not match:
-        return text
-    prefix = text[:match.start()]
-    rows = []
-    currency = None
-    for line in text[match.end():].splitlines():
-        if not line.strip().startswith('|'):
-            continue
-        cells = [c.strip().replace('**', '') for c in line.strip().strip('|').split('|')]
-        if len(cells) != 2:
-            return prefix + unavailable_budget()
-        category, value = cells
-        if category.lower() in ('category', 'total') or re.fullmatch(r'[-: ]+', category):
-            continue
-        # One currency and unambiguous dot-decimal amounts only; reject ambiguous formats.
-        value = value.replace('\u20ac', 'EUR').replace('\u00a3', 'GBP').replace('\u2013', '-').replace('\u2014', '-')
-        parsed = re.fullmatch(r'(EUR|USD|GBP|\$)\s*(\d+(?:\.\d{1,2})?)(?:\s*-\s*(\d+(?:\.\d{1,2})?))?', value)
-        if not parsed:
-            return prefix + unavailable_budget()
-        code = {'$':'USD'}.get(parsed[1], parsed[1])
-        if currency and code != currency:
-            return prefix + unavailable_budget()
-        currency = code
-        low, high = Decimal(parsed[2]), Decimal(parsed[3] or parsed[2])
-        if high < low or re.search(r'total|person|group|subtotal', category, re.I):
-            return prefix + unavailable_budget()
-        rows.append((category, low, high))
-    if not rows or len({r[0].lower() for r in rows}) != len(rows):
-        return prefix + unavailable_budget()
-    def amount(low, high):
-        return f'{currency} {low:.2f}' + (f'-{high:.2f}' if high != low else '')
-    result = ['## Estimated budget', 'Approximate estimates per person for the whole trip. Totals calculated from the listed categories; not live quotes.', '| Category | Estimated cost |', '|---|---:|']
-    result += [f'| {name} | {amount(low, high)} |' for name, low, high in rows]
-    result.append(f'| **Total per person** | **{amount(sum(r[1] for r in rows), sum(r[2] for r in rows))}** |')
-    result.append('Only listed categories are included. Unlisted flights, insurance, taxes and other expenses are excluded. Confirm prices and availability before booking.')
-    return prefix + '\n\n'.join([result[0], result[1], '\n'.join(result[2:-1]), result[-1]])
+def normalized(text):
+    return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c)).lower()
 
 
 def unavailable_budget():
@@ -70,12 +35,81 @@ def qualify_routes(text):
     return text.rstrip() + '\n\n**Route and access check:** Suggested stops are not verified routes. Confirm venue addresses, travel times, opening hours, step-free access and facilities with a map and each venue before relying on this plan.'
 
 
-def structured_budget(text, facts):
-    """Render one ledger in code; all line items are per person for the full trip."""
+def budget_context(data, trip):
+    travelers = data.get('travelers', 1)
+    days = data.get('days', (trip or {}).get('days', 1))
+    if type(travelers) is not int or not 1 <= travelers <= 20 or type(days) is not int or not 1 <= days <= 30:
+        raise ValueError('Budget needs a valid traveler count and number of days.')
+    if trip and trip.get('travelers', travelers) != travelers:
+        raise ValueError('Budget traveler count differs from the trip brief.')
+    if trip and trip.get('days', days) != days:
+        raise ValueError('Budget day count differs from the trip brief.')
+    group = data.get('cost_basis') == 'group'
+    if travelers > 1 and not group:
+        raise ValueError('Multiple travelers require cost_basis=group, explicit unit_basis and occurrences for each item.')
+    return travelers, days, group
+
+
+def item_units(item, travelers, days, group, meals):
+    if not group:
+        return Decimal(str(item['quantity']))
+    basis = item.get('unit_basis')
+    if basis not in ('per_person', 'per_group'):
+        raise ValueError('Each group cost needs unit_basis=per_person or per_group.')
+    people = item.get('people', travelers)
+    if type(people) is not int or not 1 <= people <= travelers:
+        raise ValueError('Cost item people must be within the traveler count.')
+    if item.get('meal'):
+        meal = item['meal']
+        covered_days = item.get('days')
+        if meal not in ('breakfast', 'lunch', 'dinner') or not isinstance(covered_days, list) or not covered_days or len(set(covered_days)) != len(covered_days):
+            raise ValueError('Meals need breakfast/lunch/dinner and distinct trip day numbers.')
+        if any(type(day) is not int or not 1 <= day <= days for day in covered_days):
+            raise ValueError('Meal day is outside the trip.')
+        for day in covered_days:
+            meals[day, meal] = meals.get((day, meal), 0) + people
+        occurrences = len(covered_days)
+    else:
+        if item.get('category', '').lower() in ('food', 'meals', 'dining', 'restaurants') and not item.get('supplement'):
+            raise ValueError('Main food costs must identify their meal and days; mark snacks as supplement=true.')
+        occurrences = item.get('occurrences')
+        if type(occurrences) is not int or not 1 <= occurrences <= 1000:
+            raise ValueError('Each non-meal cost needs a positive integer occurrences count.')
+    return Decimal(occurrences * (people if basis == 'per_person' else 1))
+
+
+def meal_coverage(data, meals, travelers, days):
+    exclusions = data.get('meal_exclusions', [])
+    if not isinstance(exclusions, list):
+        raise ValueError('Meal exclusions must be a list.')
+    notes = []
+    for excluded in exclusions:
+        if not isinstance(excluded, dict):
+            raise ValueError('Each meal exclusion must be an object.')
+        reason = excluded.get('reason')
+        if not isinstance(reason, str) or not 1 <= len(reason) <= 200 or excluded.get('meal') not in ('breakfast', 'lunch', 'dinner'):
+            raise ValueError('Excluded meals need a meal type and an explicit reason.')
+        for day in excluded.get('days', []):
+            if type(day) is not int or not 1 <= day <= days or (day, excluded['meal']) in meals:
+                raise ValueError('Excluded meal conflicts with a listed meal or trip day.')
+            meals[day, excluded['meal']] = travelers
+            notes.append(f"Day {day} {excluded['meal']}: {reason}")
+    for day in range(1, days+1):
+        for meal in ('breakfast', 'lunch', 'dinner'):
+            if meals.get((day, meal), 0) != travelers:
+                raise ValueError(f'Day {day} {meal} must cover all {travelers} travelers exactly once, or have an explicit meal exclusion.')
+    return notes
+
+
+def structured_budget(text, facts, trip=None):
+    """Calculate quantities and group/per-person totals from one cost ledger."""
     match = re.search(r'```budget-json\s*\n(.*?)\n```', text, re.S)
     if not match:
         raise ValueError('Missing structured cost ledger.')
     data = json.loads(match[1], parse_float=Decimal)
+    if not isinstance(data, dict):
+        raise ValueError('Budget ledger must be an object.')
+    travelers, days, group = budget_context(data, trip)
     currency = data['currency']
     if not re.fullmatch(r'[A-Z]{3}', currency):
         raise ValueError('Invalid ledger currency.')
@@ -83,33 +117,44 @@ def structured_budget(text, facts):
     if not isinstance(items, list) or not 1 <= len(items) <= 100:
         raise ValueError('Missing or excessive cost items.')
     rows, categories, identifiers, sources, admissions = [], {}, set(), set(), set()
+    meals = {}
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise ValueError('Every cost item must be an object.')
         # A display-row ID is bookkeeping, not evidence. Generate it if the
         # model supplies only venue_id; never invent a price or quantity.
         identifier, label, category = item.get('id', f'cost_{index}'), item['label'], item['category']
-        if not all(isinstance(v, str) and re.fullmatch(r"[\w .,:()/'&+\-]{1,100}", v) for v in (identifier, label, category)) or identifier in identifiers:
+        if not all(isinstance(v, str) and re.fullmatch(r"[\w .,:()/'\u2019&+\-\u2013\u2014]{1,100}", v) for v in (identifier, label, category)) or identifier in identifiers:
             raise ValueError('Invalid or duplicate cost item.')
         identifiers.add(identifier)
-        cost, quantity = Decimal(str(item['unit_cost'])), Decimal(str(item['quantity']))
+        cost = Decimal(str(item['unit_cost']))
+        quantity = item_units(item, travelers, days, group, meals)
         if not cost.is_finite() or not quantity.is_finite() or cost < 0 or not 0 < quantity <= 1000 or cost > 1000000:
             raise ValueError('Invalid cost or quantity.')
         basis = 'planning estimate'
-        matching = [key for key, entry in CATALOG.items() if 'heading' in entry and any(alias in normalized(label) for alias in entry['aliases'])]
-        matching += [key for key, fact in facts.items() if fact.get('unit_price') is not None and normalized(fact.get('name', '')) and normalized(fact['name']) in normalized(label) and key not in matching]
+        matching = [key for key, fact in facts.items() if fact.get('unit_price') is not None and normalized(fact.get('name', '')) and normalized(fact['name']) in normalized(label)]
         exterior_only = bool(re.search(r'\b(exterior|outside|exterior-only)\b', label, re.I)) and cost == 0
         venue_id = item.get('venue_id') or (matching[0] if matching and not exterior_only else None)
         if venue_id:
             fact = facts.get(venue_id, {})
             if fact.get('status') == 'web_sourced' and fact.get('currency') == currency and 'unit_price' in fact:
+                if group and item.get('unit_basis') != 'per_person':
+                    raise ValueError('Sourced adult ticket and individual menu prices require unit_basis=per_person.')
+                if fact.get('price_kind') == 'meal':
+                    if not item.get('meal') or not item.get('price_option') or item['price_option'] != fact.get('price_option'):
+                        raise ValueError('The restaurant cost must match the exact sourced menu option.')
+                    if fact.get('valid_from') or fact.get('valid_until'):
+                        if not data.get('start_date'):
+                            raise ValueError('Dated menu prices require a trip start_date or an unsourced meal estimate.')
+                        start = date.fromisoformat(data['start_date'])
+                        for day in item.get('days', []):
+                            visit = (start + timedelta(days=day-1)).isoformat()
+                            if fact.get('valid_from') and visit < fact['valid_from'] or fact.get('valid_until') and visit > fact['valid_until']:
+                                raise ValueError('Sourced menu price does not cover the planned meal date.')
                 cost = Decimal(fact['unit_price'])
                 basis = 'web-sourced reference, checked ' + fact['checked_at'][:10]
-            elif fact.get('status') == 'web_sourced' and category.lower() in ('food', 'meals', 'dining', 'restaurants') and not re.search(r'entry|admission|ticket', label, re.I):
+            elif fact.get('status') == 'web_sourced' and category.lower() in ('food', 'meals', 'dining', 'restaurants') and not item.get('price_option') and not re.search(r'entry|admission|ticket', label, re.I):
                 basis = 'meal estimate; venue location web-sourced'
-            elif currency == 'EUR' and fact.get('status') == 'verified' and 'adult_entry_eur' in fact:
-                cost = Decimal(fact['adult_entry_eur'])
-                basis = 'standard adult entry, checked ' + fact['checked_at'][:10]
             else:
                 raise ValueError('Official admission price unavailable; omit the paid interior visit or revise the plan.')
             admissions.add(venue_id)
@@ -118,28 +163,61 @@ def structured_budget(text, facts):
         cost = cost.quantize(Decimal('0.01'))
         subtotal = (cost * quantity).quantize(Decimal('0.01'))
         categories[category] = categories.get(category, Decimal(0)) + subtotal
+        if group:
+            basis = ('unit price per person; ' if item['unit_basis'] == 'per_person' else 'unit price per group; ') + basis
         rows.append(f'| {label} | {currency} {cost:.2f} | {quantity} | {currency} {subtotal:.2f} | {basis} |')
-    for key, entry in CATALOG.items():
-        if 'heading' not in entry or key in admissions:
+    for key, fact in facts.items():
+        if fact.get('unit_price') is None or key in admissions or not fact.get('name'):
             continue
-        mentions = [line for line in text[:match.start()].splitlines() if any(alias in normalized(line) for alias in entry['aliases'])]
+        mentions = [line for line in text[:match.start()].splitlines() if normalized(fact['name']) in normalized(line)]
         if any(not re.search(r'\b(exterior|outside|exterior-only)\b', line, re.I) for line in mentions):
             raise ValueError('A mentioned admission is missing from the ledger; include it or specify exterior-only.')
     total = sum(categories.values())
+    exclusions = meal_coverage(data, meals, travelers, days) if group else []
+    group_total = total if group else total * travelers
+    per_person = (group_total / travelers).quantize(Decimal('0.01'))
     # Eliminate independent model totals/taxi fares elsewhere. The named ledger
     # items below retain every numerical cost and explain category differences.
     narrative = re.split(r'(?im)^## Estimated budget\s*$', text[:match.start()])[0]
-    narrative = re.sub(r'(?:EUR|USD|GBP|\u20ac|\$|\u00a3)\s*\d+(?:[.,]\d+)*(?:\s*[-\u2013]\s*\d+(?:[.,]\d+)*)?', 'see cost ledger', narrative)
-    narrative = re.sub(r'\d+(?:[.,]\d+)*\s*(?:EUR|USD|GBP)\b', 'see cost ledger', narrative)
-    output = [narrative.rstrip(), '## Estimated budget', 'All line items are per person for the entire trip. Quantities must allocate shared costs per person. Estimated prices are not quotes.', '| Item | Unit cost | Quantity | Subtotal | Basis |', '|---|---:|---:|---:|---|', *rows, '', '| Category | Estimated cost |', '|---|---:|']
-    output += [f'| {category} | {currency} {amount:.2f} |' for category, amount in categories.items()]
-    output.append(f'| **Total per person** | **{currency} {total:.2f}** |')
-    if data.get('cap_per_person') is not None:
-        cap = Decimal(str(data['cap_per_person']))
+    currencies = '|'.join(sorted({currency, 'EUR', 'USD', 'GBP'}))
+    narrative = re.sub(r'(?:' + currencies + r'|\u20ac|\$|\u00a3)\s*\d+(?:[.,]\d+)*(?:\s*[-\u2013]\s*\d+(?:[.,]\d+)*)?', 'see cost ledger', narrative)
+    narrative = re.sub(r'\d+(?:[.,]\d+)*\s*(?:' + currencies + r')\b', 'see cost ledger', narrative)
+    party = f'{travelers} traveler' + ('s' if travelers != 1 else '')
+    conclusion = f'Estimated group total for {party}: {currency} {group_total:.2f}; per person: {currency} {per_person:.2f}.'
+    cap_data = data.get('cap')
+    cap = None
+    if cap_data is not None:
+        if not isinstance(cap_data, dict):
+            raise ValueError('Budget cap must specify an amount and basis.')
+        if cap_data.get('basis') not in ('group', 'per_person'):
+            raise ValueError('Budget cap must specify group or per_person basis.')
+        cap = Decimal(str(cap_data['amount'])) * (travelers if cap_data['basis'] == 'per_person' else 1)
+    elif data.get('cap_per_person') is not None:
+        cap = Decimal(str(data['cap_per_person'])) * travelers
+    if cap is not None:
         if not cap.is_finite() or cap <= 0:
             raise ValueError('Invalid budget cap.')
-        output.append(f'Planning cap per person: {currency} {cap:.2f}. ' + (f'Over cap by {currency} {total-cap:.2f}; this plan does not meet the cap.' if total > cap else f'Remaining buffer: {currency} {cap-total:.2f}.'))
+        conclusion += f' Group cap: {currency} {cap:.2f}. ' + (f'Over cap by {currency} {group_total-cap:.2f}; this plan does not meet the cap.' if group_total > cap else f'Remaining buffer: {currency} {cap-group_total:.2f}.')
+    if group:
+        summary = f"{days}-day trip for {party}" + (f" to {trip['destination']}" if trip and trip.get('destination') else '') + '.'
+        if trip and trip.get('interests'):
+            summary += ' Interests: ' + ', '.join(trip['interests']) + '.'
+        summary += ' ' + conclusion
+        pattern = r'(?ims)^## Trip summary[^\n]*\n.*?(?=^## |\Z)'
+        if re.search(pattern, narrative):
+            narrative = re.sub(pattern, lambda _: '## Trip summary\n' + summary + '\n\n', narrative, count=1)
+        else:
+            narrative = '## Trip summary\n' + summary + '\n\n' + narrative
+    scope = f'Line subtotals cover the whole group of {travelers} for {days} days. Units are calculated from people and occurrences.' if group else 'Line subtotals are per person for the whole trip.'
+    output = [narrative.rstrip(), '## Estimated budget', scope + ' All estimates are planning references, not quotes.', '| Item | Unit cost | Units | Subtotal | Basis |', '|---|---:|---:|---:|---|', *rows, '', '| Category | Estimated cost |', '|---|---:|']
+    output += [f'| {category} | {currency} {amount:.2f} |' for category, amount in categories.items()]
+    if group:
+        output.append(f'| **Total group ({party})** | **{currency} {group_total:.2f}** |')
+    output.append(f'| **Total per person** | **{currency} {per_person:.2f}** |')
+    output.append(conclusion)
+    if exclusions:
+        output.append('Meals outside this estimate: ' + '; '.join(exclusions) + '.')
     output += ['Only listed items are included; unlisted flights, insurance and other expenses are excluded. Confirm eligibility, prices and availability before booking.']
     if sources:
-        output.append(('Admission sources: ' if any(f.get('status') == 'web_sourced' for f in facts.values()) else 'Official admission sources: ') + ', '.join(sorted(sources)))
+        output.append('Sources: ' + ', '.join(sorted(sources)))
     return '\n\n'.join([output[0], output[1], output[2], '\n'.join(output[3:])])

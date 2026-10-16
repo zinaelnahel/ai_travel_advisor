@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from advisor import MODEL_RATES, SECURITY_PROMPT, TravelAdvisor
+from travel_validation import structured_budget
 
 
 CASES = [
@@ -52,11 +53,14 @@ def compare(api_key, repeats=1, output_dir="model_comparison", transport=None):
             message = advisor.chat(model, [{"role": "system", "content": SECURITY_PROMPT + advisor.itinerary_prompt},
                                          {"role": "user", "content": case["prompt"]}], "benchmark", max_tokens=3500)
             text = advisor.reply_text(message)
+            if '```budget-json' in text:
+                text = structured_budget(text, {})
             file = f"{case['id']}_{model}_{repeat + 1}.md"
             (output / file).write_text(text, encoding="utf-8")
             row.update(success=True, response_file=file, **format_checks(text, case["days"]))
-        except (RuntimeError, ValueError) as error:
+        except (RuntimeError, ValueError, KeyError, TypeError, ArithmeticError) as error:
             row["error"] = str(error)
+            row['error_code'] = getattr(error, 'code', None)
         row["latency_s"] = time.perf_counter() - started
         row["cost_usd"] = sum(m["cost_usd"] for m in advisor.metrics[count_before:])
         row["input_tokens"] = sum(m["input"] for m in advisor.metrics[count_before:])
@@ -64,7 +68,7 @@ def compare(api_key, repeats=1, output_dir="model_comparison", transport=None):
         rows.append(row)
         (output / "results.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
         # Stop global auth/quota failures rather than make nine identical requests.
-        if "HTTP 401" in row.get("error", "") or "HTTP 403" in row.get("error", "") or "HTTP 429" in row.get("error", ""):
+        if row.get('error_code') in ('provider_authentication', 'provider_access', 'provider_quota', 'provider_rate_limit'):
             break
     report = ["# Model comparison", "", "Same prompts, temperature 0.3, 3,500 output-token cap. No live tools or images, so each model sees identical data.",
               "Latency is wall-clock request time, not time to first token. USD cost uses API-reported usage and configured rates.", "",

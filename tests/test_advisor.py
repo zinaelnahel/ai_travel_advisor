@@ -11,6 +11,7 @@ from advisor import (
     safe_markdown, token_bound, validate_arguments,
 )
 from model_comparison import compare
+from travel_errors import ServiceError
 
 
 def answer(text=None, call=None, usage=None, finish_reason="stop"):
@@ -41,6 +42,20 @@ class AdvisorTests(unittest.TestCase):
         self.assertIsNone(advisor.last_itinerary)
         self.assertEqual(advisor.transport.call_count, 1)
 
+    def test_handoff_preserves_traveler_count(self):
+        arguments = {'destination': 'Copenhagen', 'days': 2, 'interests': ['vegetarian food'], 'travelers': 2}
+        self.assertEqual(validate_arguments('generate_itinerary', arguments)['travelers'], 2)
+        for invalid in (True, 0, 21):
+            with self.assertRaises(ValueError):
+                validate_arguments('generate_itinerary', dict(arguments, travelers=invalid))
+
+    def test_comparison_stops_on_auth_failure(self):
+        transport = Mock(side_effect=ServiceError('provider_authentication', 'Invalid server credentials.', 503))
+        with tempfile.TemporaryDirectory() as directory:
+            rows = compare('fake', output_dir=directory, transport=transport)
+        self.assertEqual(transport.call_count, 1)
+        self.assertEqual(rows[0]['error_code'], 'provider_authentication')
+
     def test_invalid_budget_gets_one_automatic_repair(self):
         invalid = '### Day 1: Lisbon\nVisit a museum.\n## Estimated budget\nUnknown'
         repaired = '### Day 1: Lisbon\nVisit a museum.\n## Estimated budget\n```budget-json\n' + json.dumps({'currency': 'EUR', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '40', 'quantity': '1'}]}) + '\n```'
@@ -66,20 +81,6 @@ class AdvisorTests(unittest.TestCase):
         self.assertEqual(sum(m['role'] == 'assistant' for m in payloads[2]['messages']), 1)
         self.assertNotIn(large_draft, [m.get('content') for m in payloads[2]['messages']])
         self.assertIn('example.org/garden', payloads[2]['messages'][-1]['content'])
-
-    def test_source_review_overrides_price_and_restaurant_location(self):
-        candidate = '### Day 1: Lisbon\nDinner at The Food Temple in Chiado.\nVisit Jeronimos.'
-        ledger = {'currency': 'EUR', 'items': [{'id': 'j', 'label': 'Jeronimos admission', 'category': 'Activities', 'unit_cost': '10', 'quantity': '1', 'venue_id': 'jeronimos'}]}
-        repaired = candidate + '\n## Estimated budget\n```budget-json\n' + json.dumps(ledger) + '\n```'
-        facts = {'jeronimos': {'status': 'verified', 'name': 'Jeronimos', 'adult_entry_eur': '18', 'source_url': 'https://example.org/official', 'checked_at': '2026-10-16'},
-                 'food_temple': {'status': 'verified', 'address': 'Beco do Jasmim, 18, Mouraria, Lisbon', 'source_url': 'https://www.thefoodtemple.com/', 'checked_at': '2026-10-16'}}
-        advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Lisbon', days=1, interests=['food'])), answer(candidate), answer(repaired))
-        with patch('advisor.venue_facts', return_value=facts):
-            result = advisor.reply('Lisbon one day food')
-        self.assertIn('**EUR 18.00**', result)
-        self.assertIn('Mouraria', result)
-        self.assertNotIn('Food Temple in Chiado', result)
-        self.assertEqual(result.count('**Route and access check:**'), 1)
 
     def test_external_lookup_before_handoff(self):
         lookup = tool_call("get_exchange_rate", amount=200, from_currency="EUR", to_currency="USD")
