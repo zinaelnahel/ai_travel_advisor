@@ -242,6 +242,8 @@ class TravelAdvisor:
         self.manager_model, self.planner_model = manager_model, planner_model
         self.itinerary_prompt = itinerary_prompt or (PACKAGE_ROOT / "prompts/itinerary.txt").read_text(encoding="utf-8")
         self.transport, self.fetch = transport, fetch
+        if isinstance(budget_usd, bool) or not isinstance(budget_usd, (int, float)) or not math.isfinite(budget_usd) or budget_usd < 0:
+            raise ValueError('The conversation allowance must be a finite nonnegative amount.')
         self.budget_usd = budget_usd
         self.web_search = os.getenv('WEB_SEARCH_ENABLED', '1') == '1' if web_search is None else bool(web_search)
         self.reset()
@@ -482,7 +484,7 @@ class TravelAdvisor:
                         continue
                 try:
                     self.stage = 'budget_validation'
-                    validate_plan_format(candidate)
+                    validate_plan_format(candidate, expected_days=brief['days'])
                     result = structured_budget(candidate, facts, trip=brief)
                 except (ValueError, KeyError, TypeError, ArithmeticError) as exc:
                     reason, explanation = validation_reason(exc)

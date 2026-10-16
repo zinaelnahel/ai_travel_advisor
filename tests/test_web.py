@@ -39,6 +39,14 @@ class WebTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("frame-ancestors 'none'", response.headers['Content-Security-Policy'])
 
+    def test_misconfigured_allowance_returns_safe_configuration_error(self):
+        client = TestClient(create_app())
+        for allowance in ('NaN', 'Infinity', '-1', 'not-a-number'):
+            with patch.dict(os.environ, {'OPENAI_API_KEY': 'fake', 'CONVERSATION_BUDGET_USD': allowance}):
+                response = client.post('/api/chat', json={'message': 'Hello'}, headers=self.headers)
+                self.assertEqual(response.status_code, 503)
+                self.assertIn('misconfigured', response.json()['error'])
+
     def test_home_keeps_simple_chat_and_itinerary(self):
         page = self.client.get('/').text
         self.assertNotIn('id="lookup-city"', page)
@@ -118,7 +126,7 @@ class WebTests(unittest.TestCase):
                 'arguments': '{"destination":"Lisbon","days":3,"interests":["food"]}'}}
         self.transport.side_effect = [
             {'choices': [{'message': {'content': None, 'tool_calls': [call]}, 'finish_reason': 'stop'}]},
-            answer(valid_plan('Lisbon'))]
+            answer(valid_plan('Lisbon', days=3))]
         plan = self.post('chat', message='Lisbon, 3 days, food').json()
         self.assertEqual(plan['destination'], 'Lisbon')
         self.assertIn('<h1>', plan['itinerary_html'])

@@ -104,8 +104,11 @@ def create_app(advisor_factory=None):
             return JSONResponse({'error': str(exc)}, 503)
         if action != 'restore' and not advisor_factory and not os.getenv('OPENAI_API_KEY'):
             return JSONResponse({'error': 'Configure OPENAI_API_KEY on the server.'}, 503)
-        advisor = advisor_factory() if advisor_factory else TravelAdvisor(
-            os.getenv('OPENAI_API_KEY', ''), budget_usd=float(os.getenv('CONVERSATION_BUDGET_USD', '1')))
+        try:
+            advisor = advisor_factory() if advisor_factory else TravelAdvisor(
+                os.getenv('OPENAI_API_KEY', ''), budget_usd=float(os.getenv('CONVERSATION_BUDGET_USD', '1')))
+        except (TypeError, ValueError):
+            return JSONResponse({'error': 'The server AI allowance is misconfigured. Set CONVERSATION_BUDGET_USD to a finite nonnegative number.'}, 503)
         token = body.get('state')
         if token is not None and action != 'reset':
             try:

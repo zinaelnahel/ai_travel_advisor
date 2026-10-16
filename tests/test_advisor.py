@@ -18,8 +18,8 @@ def answer(text=None, call=None, usage=None, finish_reason="stop"):
     return {"choices": [{"message": {"content": text, **({"tool_calls": [call]} if call else {})}, "finish_reason": finish_reason}],
             "usage": usage or {"prompt_tokens": 100, "completion_tokens": 20, "prompt_tokens_details": {"cached_tokens": 40}}}
 
-def valid_plan(title='Berlin'):
-    return '# ' + title + '\n### Day 1: Explore\nExplore the city.\n## Estimated budget\n```budget-json\n' + json.dumps({'currency': 'EUR', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '40', 'quantity': '1'}]}) + '\n```'
+def valid_plan(title='Berlin', days=2):
+    return '# ' + title + '\n' + ''.join(f'### Day {day}: Explore\nExplore the city.\n' for day in range(1, days + 1)) + '## Estimated budget\n```budget-json\n' + json.dumps({'currency': 'EUR', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '40', 'quantity': '1'}]}) + '\n```'
 
 
 def tool_call(name, **arguments):
@@ -45,6 +45,11 @@ class AdvisorTests(unittest.TestCase):
         advisor.reply("I like museums")
         self.assertIsNone(advisor.last_itinerary)
         self.assertEqual(advisor.transport.call_count, 1)
+
+    def test_invalid_ai_allowance_is_rejected(self):
+        for amount in (float('nan'), float('inf'), -1, True):
+            with self.assertRaises(ValueError):
+                self.advisor(budget_usd=amount)
 
     def test_budget_revision_requests_planner_handoff(self):
         advisor = self.advisor(answer(call=tool_call('generate_itinerary', destination='Berlin', days=2, interests=['food'])), answer(valid_plan()))
@@ -131,8 +136,8 @@ class AdvisorTests(unittest.TestCase):
 
     def test_kyoto_research_revision_fits_context_and_does_not_stack_drafts(self):
         ledger = {'currency': 'JPY', 'items': [{'id': 'food', 'category': 'Food', 'label': 'Meals', 'unit_cost': '3000', 'quantity': '4'}]}
-        compact = '### Day 1: Kyoto\nVisit gardens.\n## Estimated budget\n```budget-json\n' + json.dumps(ledger) + '\n```'
-        large_draft = compact.replace('Visit gardens.', 'Visit gardens and explore local culture. ' * 600)
+        compact = ''.join(f'### Day {day}: Kyoto\nVisit gardens.\n' for day in range(1, 5)) + '## Estimated budget\n```budget-json\n' + json.dumps(ledger) + '\n```'
+        large_draft = compact.replace('Visit gardens.', 'Visit gardens and explore local culture. ' * 600, 1)
         invalid = compact.replace('"quantity": "4"', '"quantity": "invalid"')
         advisor = self.advisor(answer(large_draft), answer(invalid), answer(compact), web_search=True)
         advisor.research_venues = Mock(return_value={'garden': {'name': 'Kyoto garden', 'address': 'Kyoto', 'evidence': 'Garden address',

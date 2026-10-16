@@ -1,10 +1,26 @@
 import json
 import unittest
 
-from safarai.validation import structured_budget, remove_weather_claims, qualify_routes
+from safarai.validation import structured_budget, remove_weather_claims, qualify_routes, validate_plan_format
 
 
 class ValidationTests(unittest.TestCase):
+    def test_missing_duplicate_and_out_of_order_days_are_rejected(self):
+        ledger = '\n```budget-json\n{}\n```'
+        for numbers in ([1], [1, 1], [2, 1], [1, 3]):
+            text = '\n'.join(f'### Day {day}: Exploring' for day in numbers) + ledger
+            with self.assertRaisesRegex(ValueError, 'day count'):
+                validate_plan_format(text, expected_days=2)
+        validate_plan_format('### Day 1: Exploring\n### Day 2: Food' + ledger, expected_days=2)
+
+    def test_weather_filter_keeps_calculated_budget_rows(self):
+        plan = self.plan([self.item('Rain cover', '10'), self.item('Weather contingency', '5')])
+        result = structured_budget(plan, {})
+        cleaned = remove_weather_claims(result + '\nWeather: guaranteed sunshine.')
+        self.assertIn('| Weather contingency | EUR 5.00', cleaned)
+        self.assertIn('**EUR 15.00**', cleaned)
+        self.assertNotIn('guaranteed sunshine', cleaned)
+
     def plan(self, items, cap=None, narrative='### Day 1: Exploring\nTaxi EUR 50.'):
         return narrative + '\n## Estimated budget\n```budget-json\n' + json.dumps({'currency': 'EUR', 'cap_per_person': cap, 'items': items}) + '\n```'
 

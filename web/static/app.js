@@ -235,8 +235,8 @@ async function restoreTrip() {
         $('empty-plan').hidden = true; $('plan-content').hidden = false;
       }
     } catch (error) {
-      tripState = null;
-      // Keep the saved token on transient errors so refreshing can retry.
+      // Keep the active token too: a message sent after a transient restore
+      // failure must continue this trip rather than silently start a new one.
       throw new Error('Could not restore your saved trip. Refresh to retry, or choose New trip. ' + error.message);
     }
   });

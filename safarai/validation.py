@@ -64,7 +64,7 @@ def validation_reason(error):
     return 'cost_ledger', 'The cost breakdown could not be validated.'
 
 
-def validate_plan_format(text):
+def validate_plan_format(text, expected_days=None):
     """Only readable Markdown plus one internal ledger may reach rendering."""
     ledgers = list(re.finditer(r'```budget-json\s*\n.*?\n```', text, re.S))
     if len(ledgers) != 1:
@@ -72,12 +72,12 @@ def validate_plan_format(text):
     prose = text[:ledgers[0].start()] + text[ledgers[0].end():]
     if not re.search(r'(?im)^###\s+Day\s+\d+', prose):
         raise ValueError('The Markdown itinerary needs readable ### Day N sections.')
+    if expected_days is not None:
+        day_numbers = [int(day) for day in re.findall(r'(?im)^###\s+Day\s+(\d+)\b', prose)]
+        if day_numbers != list(range(1, expected_days + 1)):
+            raise ValueError('The Markdown day count must match the trip, in order, without duplicates.')
     if re.search(r'(?m)^\s*(?:[\[{]|```)', prose):
         raise ValueError('Internal JSON or code blocks must not appear outside the budget-json ledger.')
-
-
-def unavailable_budget():
-    return '## Estimated budget\n\nThe cost estimates could not be validated. Ask for a revised budget with one currency and an amount or range for each category. No total is shown.\n'
 
 
 def remove_weather_claims(text):
@@ -85,8 +85,10 @@ def remove_weather_claims(text):
     # Replace whole matching lines; source observations are appended separately in code.
     pattern = r'\b(weather|forecast|rain|rainfall|precipitation|temperature|sunny|celsius|fahrenheit)\b|\u00b0[CF]'
     lines = text.splitlines()
-    removed = any(re.search(pattern, line, re.I) for line in lines)
-    clean = '\n'.join(line for line in lines if not re.search(pattern, line, re.I))
+    # Budget tables have already been calculated: filtering a row would make
+    # the visible line items disagree with their totals.
+    removed = any(not line.lstrip().startswith('|') and re.search(pattern, line, re.I) for line in lines)
+    clean = '\n'.join(line for line in lines if line.lstrip().startswith('|') or not re.search(pattern, line, re.I))
     if removed:
         clean += '\n\nWeather guidance: only dated provider observations below are available. No prediction is provided for dates outside that period.'
     return clean
@@ -263,6 +265,8 @@ def structured_budget(text, facts, trip=None):
             if allowance['currency'] != currency or item.get('unit_basis') != 'per_person':
                 raise ValueError('User meal allowances require matching currency and per-person units.')
             supplied_cost = Decimal(allowance['amount'])
+            if not supplied_cost.is_finite() or not 0 <= supplied_cost <= 1000000:
+                raise ValueError('User meal allowance must be a finite nonnegative amount within the cost limit.')
             if venue_id and facts.get(venue_id, {}).get('price_kind') == 'meal' and facts[venue_id].get('unit_price') is not None and cost != supplied_cost:
                 raise ValueError('The sourced menu differs from the user meal allowance; choose an unsourced allowance row or a compatible menu.')
             cost = supplied_cost
